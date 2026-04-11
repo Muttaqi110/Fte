@@ -1,0 +1,6 @@
+# Inbox
+
+This folder contains raw incoming emails fetched by the Gmail watcher.
+
+Each email is saved as a markdown file with the naming convention:
+`YYYY-MM-DD_HH-MM-SS_<subject_slug>.md`
