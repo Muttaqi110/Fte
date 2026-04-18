@@ -11,6 +11,8 @@ Workflow:
 4. Claude Code creates draft → Draft/
 5. Human approves → Approved/
 6. This poster publishes → Done/
+
+Includes retry logic with exponential backoff for transient errors.
 """
 
 import asyncio
@@ -110,14 +112,62 @@ class LinkedInPoster:
 
             logger.info("[LinkedInPoster] Navigating to LinkedIn...")
             await self._page.goto("https://www.linkedin.com", wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)  # Give more time for page to load
 
+            # Check if logged in by looking for various LinkedIn feed elements
+            logged_in = False
+            login_selectors = [
+                'button[aria-label="Start a post"]',
+                '[data-control-name="actor.sharebox"]',
+                'div.share-box',
+                'button[data-control-name="sharebox"]',
+                '.share-box-feed-entry',
+                'div[role="button"][aria-label*="post"]',
+                'span:has-text("Start a post")',
+                '.share-promoted-detour',
+                'div[class*="share-box"]',
+            ]
+
+            for selector in login_selectors:
+                try:
+                    element = await self._page.query_selector(selector)
+                    if element:
+                        is_visible = await element.is_visible()
+                        if is_visible:
+                            logged_in = True
+                            logger.info(f"[LinkedInPoster] Found login indicator: {selector}")
+                            break
+                except:
+                    continue
+
+            # Also check URL - if we're on feed, we're logged in
             current_url = self._page.url
-            if "login" in current_url or "checkpoint" in current_url:
-                logger.warning("[LinkedInPoster] Please log in to LinkedIn in the browser window")
-                logger.warning("[LinkedInPoster] Waiting for login...")
-            else:
-                logger.info("[LinkedInPoster] Browser ready - logged in")
+            if 'linkedin.com/feed' in current_url or 'linkedin.com/in/' in current_url:
+                logged_in = True
+                logger.info("[LinkedInPoster] Detected logged in from URL")
+
+            if not logged_in:
+                logger.warning("[LinkedInPoster] ============================================")
+                logger.warning("[LinkedInPoster] NOT LOGGED IN - Please log in to LinkedIn NOW")
+                logger.warning("[LinkedInPoster] The browser window is waiting for you...")
+                logger.warning("[LinkedInPoster] ============================================")
+
+                # Wait up to 5 minutes for user to log in
+                try:
+                    await self._page.wait_for_selector('button[aria-label="Start a post"], [data-control-name="actor.sharebox"], div.share-box, .share-box-feed-entry', timeout=300000)
+                    logger.info("[LinkedInPoster] Login detected! Proceeding...")
+                    logged_in = True
+                except:
+                    # Check URL again as fallback
+                    await asyncio.sleep(2)
+                    current_url = self._page.url
+                    if 'linkedin.com/feed' in current_url or 'login' not in current_url:
+                        logged_in = True
+                        logger.info("[LinkedInPoster] Login detected from URL change!")
+                    else:
+                        logger.error("[LinkedInPoster] Login timeout - took too long to log in")
+                        return False
+
             return True
         except Exception as e:
             logger.error(f"[LinkedInPoster] Browser launch failed: {e}")
@@ -174,23 +224,33 @@ class LinkedInPoster:
         approved_files = list(self.approved_path.glob("*.md"))
         return approved_files
 
-    async def publish_post(self, post_path: Path) -> bool:
+    async def publish_post(self, post_path: Path, retry_count: int = 0) -> bool:
         """
-        Publish an approved post to LinkedIn.
+        Publish an approved post to LinkedIn with retry logic.
 
         Args:
             post_path: Path to approved post markdown file
+            retry_count: Current retry attempt (internal use)
 
         Returns:
             True if published successfully
         """
-        # Start browser for posting
-        if not await self._start_browser():
-            logger.error("[LinkedInPoster] Could not start browser")
-            return False
+        MAX_RETRIES = 5
+        BASE_DELAY = 1.0
+        MAX_DELAY = 60.0
+
+        # Start browser for posting (if not already running)
+        if self._page is None:
+            if not await self._start_browser():
+                logger.error("[LinkedInPoster] Could not start browser")
+                # Don't retry here - _start_browser already waited for login
+                # Move to human review instead
+                await self._move_to_human_review(post_path, "Browser startup failed - manual login required")
+                return False
 
         if not self._page:
             logger.error("[LinkedInPoster] Could not initialize browser")
+            await self._move_to_human_review(post_path, "Browser initialization failed")
             return False
 
         # Read approved post
@@ -336,7 +396,8 @@ class LinkedInPoster:
                 debug_html = self.logs_path / f"debug_html_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
                 debug_html.write_text(html_content, encoding="utf-8")
                 logger.error(f"[LinkedInPoster] Could not find 'Start a post' button. Saved HTML to {debug_html}")
-                return False
+                # Raise exception to trigger retry
+                raise Exception("Could not find 'Start a post' button on page")
 
             # Wait for the post modal to appear
             logger.info("[LinkedInPoster] Waiting for post modal...")
@@ -437,7 +498,8 @@ class LinkedInPoster:
                 debug_html = self.logs_path / f"debug_editor_html_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
                 debug_html.write_text(html_content, encoding="utf-8")
                 logger.error(f"[LinkedInPoster] Saved HTML to {debug_html}")
-                return False
+                # Raise exception to trigger retry
+                raise Exception("Could not find text editor in post modal")
 
             await editor.click()
             await asyncio.sleep(0.5)
@@ -509,7 +571,8 @@ class LinkedInPoster:
                 # Save screenshot
                 post_btn_screenshot = self.logs_path / f"debug_post_btn_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                 await self._page.screenshot(path=str(post_btn_screenshot), full_page=True)
-                return False
+                # Raise exception to trigger retry
+                raise Exception("Could not find 'Post' button in modal")
 
             await asyncio.sleep(3)
 
@@ -539,9 +602,51 @@ class LinkedInPoster:
         except Exception as e:
             logger.error(f"[LinkedInPoster] Failed to publish post: {e}")
             await self._log_action("post_failed", post_path.stem, str(e))
-            # Close browser even on failure
+
+            # Retry with exponential backoff (keep browser open for retry)
+            if retry_count < MAX_RETRIES:
+                delay = min(BASE_DELAY * (2 ** retry_count), MAX_DELAY)
+                logger.warning(f"[LinkedInPoster] Retrying in {delay:.1f}s... (attempt {retry_count + 1}/{MAX_RETRIES})")
+                await self._log_action("post_retry", post_path.stem, f"attempt {retry_count + 1}, delay {delay:.1f}s")
+
+                # Try to refresh the page before retry
+                try:
+                    if self._page:
+                        await self._page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=30000)
+                except:
+                    pass
+
+                await asyncio.sleep(delay)
+                return await self.publish_post(post_path, retry_count + 1)
+
+            # All retries exhausted - close browser and move to Human_Review_Queue
             await self._close_browser()
+            logger.error(f"[LinkedInPoster] All {MAX_RETRIES} retries exhausted for {post_path.stem}")
+            await self._move_to_human_review(post_path, str(e))
             return False
+
+    async def _move_to_human_review(self, post_path: Path, error: str) -> None:
+        """Move failed post to human review queue."""
+        try:
+            review_path = self.approved_path.parent.parent / "Human_Review_Queue"
+            review_path.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            review_filename = f"{timestamp}_failed_{post_path.stem}.md"
+            review_file = review_path / review_filename
+
+            # Add error metadata
+            content = post_path.read_text(encoding="utf-8")
+            review_content = content + f"\n\n---\n\n**PUBLISHING FAILED:** {datetime.now().isoformat()}\n**Error:** {error}\n**Action Required:** Manual review and retry\n"
+            review_file.write_text(review_content, encoding="utf-8")
+
+            # Remove from approved
+            post_path.unlink()
+
+            await self._log_action("moved_to_human_review", post_path.stem, f"Error: {error}")
+            logger.info(f"[LinkedInPoster] Moved to Human_Review_Queue: {review_filename}")
+        except Exception as e:
+            logger.error(f"[LinkedInPoster] Failed to move to human review: {e}")
 
     def _extract_content_from_markdown(self, md_content: str) -> Optional[str]:
         """Extract post content from markdown file."""

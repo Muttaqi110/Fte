@@ -181,7 +181,7 @@ async def main():
     vault_path = Path("AI_Employee_Vault")
 
     watcher = LinkedInPostWatcher(
-        linkedin_post_path=vault_path / "linkedin_post",
+        linkedin_post_path=vault_path / "Social_Media" / "linkedin_post",
         needs_action_path=vault_path / "Needs_Action",
         logs_path=vault_path / "Logs",
         poll_interval=10.0,

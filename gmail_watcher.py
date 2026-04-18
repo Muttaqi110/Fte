@@ -4,6 +4,8 @@ Gmail Watcher - Polls Gmail for unread important messages.
 Supports two authentication methods:
 1. OAuth2 with refresh token (for personal Gmail)
 2. Service Account (for Google Workspace with domain-wide delegation)
+
+Includes retry logic with exponential backoff for transient errors.
 """
 
 import asyncio
@@ -12,7 +14,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timedelta
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -20,6 +22,7 @@ from urllib.parse import quote
 import aiohttp
 
 from base_watcher import BaseWatcher
+from retry_handler import with_retry, RetryExhaustedError, FinancialAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,8 @@ class GmailWatcher(BaseWatcher):
         self._session: Optional[aiohttp.ClientSession] = None
         self._processed_ids: set[str] = set()
         self._service_account_data: Optional[dict] = None
+        self._last_poll_time: Optional[str] = None
+        self._last_poll_time: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -295,10 +300,23 @@ class GmailWatcher(BaseWatcher):
         logger.debug(f"[{self.name}] Polling for emails...")
 
         try:
+            # Build query with "after" filter to avoid fetching old messages
+            # Only add after filter if we have a previous poll time
+            if self._last_poll_time:
+                # Use relative date format for Gmail - fetch last 2 days to catch any delayed emails
+                last_date = datetime.now() - timedelta(days=2)
+                after_filter = f"after:{last_date.strftime('%Y/%m/%d')}"
+                query_parts = [self.query, after_filter]
+                full_query = " ".join(query_parts)
+                logger.debug(f"[{self.name}] Query with after filter: {full_query}")
+            else:
+                full_query = self.query
+                logger.debug(f"[{self.name}] Query (first run): {full_query}")
+
             # Search for messages
             search_url = (
                 f"{self._get_api_url('/messages')}?"
-                f"q={quote(self.query)}&maxResults={self.max_results}"
+                f"q={quote(full_query)}&maxResults={self.max_results}"
             )
 
             async with self._session.get(
@@ -319,6 +337,8 @@ class GmailWatcher(BaseWatcher):
 
             if not messages:
                 logger.debug(f"[{self.name}] No new messages")
+                # Update poll time even if no messages
+                self._last_poll_time = datetime.now().strftime("%Y/%m/%d")
                 return True
 
             logger.info(f"[{self.name}] Found {len(messages)} message(s)")
@@ -333,6 +353,9 @@ class GmailWatcher(BaseWatcher):
 
                 await self._process_message(msg_id)
                 self._processed_ids.add(msg_id)
+
+            # Update poll time after processing
+            self._last_poll_time = datetime.now().strftime("%Y/%m/%d")
 
             return True
 
@@ -486,6 +509,8 @@ class GmailWatcher(BaseWatcher):
         slug = slug.strip("-")
         return slug.lower() or "email"
 
+    @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
+    @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
     async def send_email(
         self,
         to: str,

@@ -3,8 +3,7 @@ Orchestrator - Unified workflow engine.
 
 Single file handles all processing:
 - Processes tasks from Needs_Action
-- Uses HITL workflow if Pending_Approval folder exists
-- Generates daily LinkedIn posts if Business_Goals.md exists
+- Generates drafts on request (via skills)
 - Executes approved drafts from Approved folder
 """
 
@@ -18,7 +17,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from config_parser import get_config_parser
+
 import aiofiles
+
+from dashboard_updater import update_dashboard_on_action
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,9 @@ class Orchestrator:
         gmail_watcher=None,
         whatsapp_watcher=None,
         linkedin_poster=None,
+        x_poster=None,
+        facebook_poster=None,
+        send_mail_watcher=None,
     ):
         """
         Initialize the orchestrator.
@@ -52,6 +58,9 @@ class Orchestrator:
             gmail_watcher: GmailWatcher instance for sending emails
             whatsapp_watcher: WhatsAppWatcher instance for sending WhatsApp messages
             linkedin_poster: LinkedInPoster instance for publishing posts
+            x_poster: XPoster instance for publishing X (Twitter) posts
+            facebook_poster: FacebookPoster instance for publishing Facebook posts
+            send_mail_watcher: SendMailWatcher instance for monitoring send_mails
         """
         self.vault_path = Path(vault_path)
         self.poll_interval = poll_interval
@@ -59,6 +68,12 @@ class Orchestrator:
         self.gmail_watcher = gmail_watcher
         self.whatsapp_watcher = whatsapp_watcher
         self.linkedin_poster = linkedin_poster
+        self.x_poster = x_poster
+        self.facebook_poster = facebook_poster
+        self.send_mail_watcher = send_mail_watcher
+
+        # Dynamic config from vault files
+        self.config = get_config_parser(vault_path)
 
         # Paths
         self.needs_action_path = self.vault_path / "Needs_Action"
@@ -72,41 +87,41 @@ class Orchestrator:
         self.business_goals_path = self.vault_path / "Business_Goals.md"
 
         # LinkedIn posts paths
-        self.linkedin_posts_path = self.vault_path / "LinkedIn_Posts"
+        self.linkedin_posts_path = self.vault_path / "Social_Media" / "LinkedIn_Posts"
         self.linkedin_drafts_path = self.linkedin_posts_path / "Draft"
         self.linkedin_approved_path = self.linkedin_posts_path / "Approved"
         self.linkedin_done_path = self.linkedin_posts_path / "Done"
 
         # Gmail messages paths
-        self.gmail_messages_path = self.vault_path / "Gmail_Messages"
+        self.gmail_messages_path = self.vault_path / "Gmail" / "Gmail_Messages"
         self.gmail_drafts_path = self.gmail_messages_path / "Draft"
         self.gmail_approved_path = self.gmail_messages_path / "Approved"
         self.gmail_done_path = self.gmail_messages_path / "Done"
 
         # WhatsApp messages paths
-        self.whatsapp_messages_path = self.vault_path / "WhatsApp_Messages"
+        self.whatsapp_messages_path = self.vault_path / "WhatsApp" / "WhatsApp_Messages"
         self.whatsapp_drafts_path = self.whatsapp_messages_path / "Draft"
         self.whatsapp_approved_path = self.whatsapp_messages_path / "Approved"
         self.whatsapp_done_path = self.whatsapp_messages_path / "Done"
 
-        # Gmail messages paths
-        self.gmail_messages_path = self.vault_path / "Gmail_Messages"
-        self.gmail_drafts_path = self.gmail_messages_path / "Draft"
-        self.gmail_approved_path = self.gmail_messages_path / "Approved"
-        self.gmail_done_path = self.gmail_messages_path / "Done"
+        # X (Twitter) posts paths
+        self.x_posts_path = self.vault_path / "Social_Media" / "X_Posts"
+        self.x_drafts_path = self.x_posts_path / "Draft"
+        self.x_approved_path = self.x_posts_path / "Approved"
+        self.x_done_path = self.x_posts_path / "Done"
 
-        # WhatsApp messages paths
-        self.whatsapp_messages_path = self.vault_path / "WhatsApp_Messages"
-        self.whatsapp_drafts_path = self.whatsapp_messages_path / "Draft"
-        self.whatsapp_approved_path = self.whatsapp_messages_path / "Approved"
-        self.whatsapp_done_path = self.whatsapp_messages_path / "Done"
+        # Facebook posts paths
+        self.facebook_posts_path = self.vault_path / "Social_Media" / "Facebook_Posts"
+        self.facebook_drafts_path = self.facebook_posts_path / "Draft"
+        self.facebook_approved_path = self.facebook_posts_path / "Approved"
+        self.facebook_done_path = self.facebook_posts_path / "Done"
 
         self._running = False
         self._processed_files: set[str] = set()
         self._last_daily_post: Optional[datetime] = None
 
-        # Detect features
-        self.daily_posts = self.business_goals_path.exists()
+        # Disabled daily auto-posts - only on request
+        self.daily_posts = False
 
         features = []
         if self.daily_posts:
@@ -131,10 +146,6 @@ class Orchestrator:
 
                 # Always: Execute approved drafts
                 await self._check_approved()
-
-                # If enabled: Daily LinkedIn post
-                if self.daily_posts:
-                    await self._check_daily_post()
 
                 await asyncio.sleep(self.poll_interval)
 
@@ -175,10 +186,46 @@ class Orchestrator:
         flags = self._check_flags(content)
         source = metadata.get("source", "email")
 
-        # Check if this is a LinkedIn post request
+        # Check if this is a mail request from send_mails folder
+        if task_path.name.startswith("mail_") or source == "send_mails":
+            await self._process_mail_request(task_path, content, metadata)
+            return
+
+        # Check if this is a social media post request
         if "linkedin_post" in task_path.name.lower() or "linkedin post request" in content.lower():
             await self._process_linkedin_post_request(task_path, content, metadata)
             return
+
+        if "_x_post" in task_path.name.lower() or "_twitter_post" in task_path.name.lower():
+            await self._process_x_post_request(task_path, content, metadata)
+            return
+
+        if "_facebook_post" in task_path.name.lower():
+            await self._process_facebook_post_request(task_path, content, metadata)
+            return
+
+        # Check if this is an invoice request - skip and let OdooInvoiceWatcher handle it
+        # Get thresholds dynamically from config
+        thresholds = self.config.get_financial_thresholds()
+        payment_flag_amount = thresholds.get("payment_flag_amount", 500)
+
+        invoice_keywords = ["invoice", "bill", "payment request", "create invoice", "send invoice"]
+        content_lower = content.lower()
+
+        # Check if this is an invoice request - skip and let OdooInvoiceWatcher handle it
+        if any(kw in content_lower for kw in invoice_keywords) or "invoice" in task_path.name.lower():
+            logger.info(f"[Orchestrator] Invoice request detected - skipping (handled by OdooInvoiceWatcher): {task_path.name}")
+            return
+
+        # Check if payment > threshold - flag for manual approval (dynamic from config)
+        if "payment" in content_lower or "pay" in content_lower:
+            amount_match = re.search(r"\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", content)
+            if amount_match:
+                amount = int(amount_match.group(1).replace(",", ""))
+                if amount > payment_flag_amount:
+                    logger.info(f"[Orchestrator] Payment over ${payment_flag_amount} detected - requiring manual approval: {task_path.name}")
+                    flags["requires_manual_approval"] = True
+                    flags["reasons"].append(f"Payment amount ${amount} exceeds ${payment_flag_amount} threshold")
 
         handbook = await self._read_file(self.handbook_path)
 
@@ -225,6 +272,191 @@ class Orchestrator:
 
         await self._log_action("task_processed", task_path.name, {"draft": str(draft_path), "source": source})
 
+    async def _process_mail_request(self, task_path: Path, content: str, metadata: dict) -> None:
+        """Process a mail request - generate draft for Gmail approval flow."""
+        logger.info(f"[Orchestrator] Processing mail request: {task_path.name}")
+
+        # Extract recipient from metadata or content
+        recipient = metadata.get("recipient", "")
+        if not recipient:
+            import re
+            email_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", content)
+            if email_match:
+                recipient = email_match.group(0)
+
+        # Ensure Gmail directories exist
+        self.gmail_drafts_path.mkdir(parents=True, exist_ok=True)
+        self.gmail_approved_path.mkdir(parents=True, exist_ok=True)
+        self.gmail_done_path.mkdir(parents=True, exist_ok=True)
+
+        # Create plan
+        plan = self._create_mail_plan(content, task_path.name, recipient)
+        plan_path = self.plans_path / f"plan_{task_path.name}"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(plan_path, "w", encoding="utf-8") as f:
+            await f.write(plan)
+        logger.info(f"[Orchestrator] Mail plan created: {plan_path.name}")
+
+        # Extract requirements
+        requirements = self._extract_mail_requirements(content, recipient)
+
+        # Generate mail draft
+        draft = await self._generate_mail_draft(requirements)
+
+        # Create meaningful filename from subject and recipient
+        subject = requirements.get("subject", "mail")
+        subject_slug = re.sub(r"[^a-zA-Z0-9\s]", "", subject)
+        subject_slug = re.sub(r"[\s]+", "-", subject_slug).lower()[:20]
+        if not subject_slug:
+            subject_slug = "mail"
+
+        # Include recipient email in filename
+        recipient_email = requirements.get("recipient", "")
+        if recipient_email:
+            # Extract username from email
+            at_idx = recipient_email.find("@")
+            if at_idx > 0:
+                recipient_slug = recipient_email[:at_idx].lower()
+            else:
+                recipient_slug = recipient_email.lower()
+            recipient_slug = re.sub(r"[^a-z0-9]", "", recipient_slug)[:15]
+        else:
+            recipient_slug = "unknown"
+
+        draft_filename = f"email_{recipient_slug}_{subject_slug}.md"
+
+        # Save draft to Gmail_Messages/Draft
+        draft_path = self.gmail_drafts_path / draft_filename
+
+        async with aiofiles.open(draft_path, "w", encoding="utf-8") as f:
+            await f.write(draft)
+
+        logger.info(f"[Orchestrator] Mail draft saved: {draft_path.name}")
+        logger.info(f"[Orchestrator] Move to Gmail_Messages/Approved/ to send")
+
+        # Move original request to Done
+        shutil.move(str(task_path), str(self.done_path / task_path.name))
+
+        await self._log_action("mail_draft_created", task_path.name, {"draft": draft_path.name, "recipient": recipient})
+
+    def _create_mail_plan(self, content: str, task_name: str, recipient: str) -> str:
+        """Create a plan for mail."""
+        return f"""# Plan: Send Email
+
+| Field | Value |
+|-------|-------|
+| **Task** | {task_name} |
+| **Type** | Email |
+| **Recipient** | {recipient} |
+| **Created** | {datetime.now().isoformat()} |
+| **Status** | AUTO-EXECUTED |
+
+## Original Request
+
+{content}
+
+## Execution Steps
+
+1. [x] Read requirements
+2. [x] Generate mail draft
+3. [x] Save to Gmail Draft folder
+4. [ ] Human moves to Approved to send
+5. [ ] Send email via Gmail watcher
+
+## Workflow
+
+- ✅ Plan auto-executed (no approval needed)
+- ✅ Draft generated and saved
+- ⏳ Awaiting human approval to **send**
+- 📁 Move draft from `Gmail_Messages/Draft/` to `Gmail_Messages/Approved/`
+
+*Generated: {datetime.now().isoformat()}*
+"""
+
+    def _extract_mail_requirements(self, content: str, recipient: str) -> dict:
+        """Extract requirements from mail request."""
+        requirements = {
+            "recipient": recipient,
+            "subject": "",
+            "body": content,
+            "tone": "professional",
+        }
+
+        import re
+
+        # Extract subject
+        subject_match = re.search(r"^subject:\s*(.+)$", content, re.MULTILINE | re.IGNORECASE)
+        if subject_match:
+            requirements["subject"] = subject_match.group(1).strip()
+
+        # Extract tone
+        content_lower = content.lower()
+        if "casual" in content_lower:
+            requirements["tone"] = "casual"
+        elif "formal" in content_lower:
+            requirements["tone"] = "formal"
+        elif "friendly" in content_lower:
+            requirements["tone"] = "friendly"
+
+        return requirements
+
+    async def _generate_mail_draft(self, requirements: dict) -> str:
+        """Generate email draft using Claude."""
+        recipient = requirements.get("recipient", "")
+        subject = requirements.get("subject", "")
+        body = requirements.get("body", "")
+        tone = requirements.get("tone", "professional")
+
+        # Build prompt
+        prompt = f"""Write a professional email.
+
+## Recipient
+{recipient}
+
+## Context/What to communicate
+{body}
+
+## Tone
+{tone}
+
+Generate the email with:
+- **Subject line** - Create an appropriate subject based on the context (you decide the best subject)
+- **Body** - Professional email that addresses the recipient
+
+Format exactly as:
+
+# Email Draft
+
+## To: {recipient}
+## Subject: [your created subject]
+
+---
+
+[Email body here]
+
+---
+
+*Generated: {datetime.now().isoformat()}*"""
+
+        draft_content = await self._call_claude(prompt)
+
+        if not draft_content:
+            # Fallback
+            draft_content = f"""# Email Draft
+
+## To: {recipient}
+## Subject: {subject or "Follow up"}
+
+---
+
+{body}
+
+---
+
+*Generated: {datetime.now().isoformat()}*"""
+
+        return draft_content
+
     async def _process_linkedin_post_request(self, task_path: Path, content: str, metadata: dict) -> None:
         """Process a LinkedIn post request - auto-execute, save draft for publish approval."""
         logger.info(f"[Orchestrator] Processing LinkedIn post request: {task_path.name}")
@@ -248,8 +480,16 @@ class Orchestrator:
         # Generate LinkedIn post draft
         draft = await self._generate_linkedin_draft(requirements)
 
+        # Create meaningful filename from topic
+        topic = requirements.get("topic", "post")
+        # Clean topic for filename
+        topic_slug = re.sub(r"[^a-zA-Z0-9\s]", "", topic)
+        topic_slug = re.sub(r"[\s]+", "-", topic_slug).lower()[:30]
+        if not topic_slug:
+            topic_slug = "post"
+        draft_filename = f"linkedin_{topic_slug}.md"
+
         # Save draft to LinkedIn_Posts/Draft - human must move to Approved to publish
-        draft_filename = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_linkedin_draft.md"
         draft_path = self.linkedin_drafts_path / draft_filename
 
         async with aiofiles.open(draft_path, "w", encoding="utf-8") as f:
@@ -262,6 +502,7 @@ class Orchestrator:
         shutil.move(str(task_path), str(self.done_path / task_path.name))
 
         await self._log_action("linkedin_draft_created", task_path.name, {"draft": draft_path.name})
+        await update_dashboard_on_action(self.vault_path, "draft_created", "linkedin_draft")
 
     def _create_linkedin_plan(self, content: str, task_name: str) -> str:
         """Create a plan for LinkedIn post."""
@@ -546,6 +787,336 @@ Drop a comment below{emoji_fire}
 
         return content
 
+    # ==================== X (TWITTER) POST PROCESSING ====================
+
+    async def _process_x_post_request(self, task_path: Path, content: str, metadata: dict) -> None:
+        """Process an X (Twitter) post request - short, punchy updates."""
+        logger.info(f"[Orchestrator] Processing X (Twitter) post request: {task_path.name}")
+
+        # Ensure X posts directories exist
+        self.x_drafts_path.mkdir(parents=True, exist_ok=True)
+        self.x_approved_path.mkdir(parents=True, exist_ok=True)
+        self.x_done_path.mkdir(parents=True, exist_ok=True)
+
+        # Create plan
+        plan = self._create_social_plan(content, task_path.name, "X (Twitter)")
+        plan_path = self.plans_path / f"plan_{task_path.name}"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(plan_path, "w", encoding="utf-8") as f:
+            await f.write(plan)
+        logger.info(f"[Orchestrator] Plan created: {plan_path.name}")
+
+        # Extract requirements
+        requirements = self._extract_social_requirements(content, platform="x")
+
+        # Generate X post draft
+        draft = await self._generate_x_draft(requirements)
+
+        # Create meaningful filename from topic
+        topic = requirements.get("topic", "post")
+        topic_slug = re.sub(r"[^a-zA-Z0-9\s]", "", topic)
+        topic_slug = re.sub(r"[\s]+", "-", topic_slug).lower()[:30]
+        if not topic_slug:
+            topic_slug = "post"
+        draft_filename = f"x_{topic_slug}.md"
+
+        # Save draft
+        draft_path = self.x_drafts_path / draft_filename
+
+        async with aiofiles.open(draft_path, "w", encoding="utf-8") as f:
+            await f.write(draft)
+
+        logger.info(f"[Orchestrator] X draft saved: {draft_path.name}")
+        logger.info(f"[Orchestrator] Move to X_Posts/Approved/ to publish")
+
+        # Move original request to Done
+        shutil.move(str(task_path), str(self.done_path / task_path.name))
+
+        await self._log_action("x_draft_created", task_path.name, {"draft": draft_path.name})
+        await update_dashboard_on_action(self.vault_path, "draft_created", "x_draft")
+
+    async def _generate_x_draft(self, requirements: dict) -> str:
+        """Generate X (Twitter) post draft - short, punchy, hashtag-rich."""
+        business_goals = await self._read_file(self.business_goals_path)
+        handbook = await self._read_file(self.handbook_path)
+
+        original_request = requirements.get("business_goals", "")
+        topic = requirements.get("topic", "")
+
+        prompt = f"""Create an X (Twitter) post.
+
+## User's Request:
+{original_request}
+
+## Platform Requirements:
+- Engaging, professional text
+- Use relevant hashtags
+- Can use emojis
+- Direct and engaging tone
+
+## Business Context:
+{business_goals[:500] if business_goals else 'N/A'}
+
+## Company Rules:
+{handbook[:300] if handbook else 'N/A'}
+
+Output ONLY the post text, ready to post."""
+
+        draft_content = await self._call_claude(prompt)
+
+        if not draft_content:
+            draft_content = self._create_fallback_x_post(requirements)
+
+        # Format as proper draft
+        if "# X (Twitter) Post Draft" not in draft_content:
+            draft_content = f"""# X (Twitter) Post Draft
+
+## Status: DRAFT - AWAITING APPROVAL
+
+---
+
+## Post Content
+
+{draft_content}
+
+---
+**Platform:** X (Twitter)
+**Generated:** {datetime.now().isoformat()}*
+
+---
+
+## Approval Instructions
+
+**To approve this post:**
+1. Review the content above
+2. Edit if needed
+3. Move this file to the `Approved` folder
+
+**To reject:**
+- Delete this file
+"""
+
+        return draft_content
+
+    def _create_fallback_x_post(self, requirements: dict) -> str:
+        """Create a fallback X post."""
+        topic = requirements.get("topic", "business")
+        hashtags = requirements.get("hashtags", ["#Business", "#Growth"])
+
+        content = f"🚀 {topic} is changing everything. Are you ready? {' '.join(hashtags[:2])}"
+        return content
+
+    # ==================== FACEBOOK POST PROCESSING ====================
+
+    async def _process_facebook_post_request(self, task_path: Path, content: str, metadata: dict) -> None:
+        """Process a Facebook post request - community-focused engagement posts."""
+        logger.info(f"[Orchestrator] Processing Facebook post request: {task_path.name}")
+
+        # Ensure Facebook posts directories exist
+        self.facebook_drafts_path.mkdir(parents=True, exist_ok=True)
+        self.facebook_approved_path.mkdir(parents=True, exist_ok=True)
+        self.facebook_done_path.mkdir(parents=True, exist_ok=True)
+
+        # Create plan
+        plan = self._create_social_plan(content, task_path.name, "Facebook")
+        plan_path = self.plans_path / f"plan_{task_path.name}"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(plan_path, "w", encoding="utf-8") as f:
+            await f.write(plan)
+        logger.info(f"[Orchestrator] Plan created: {plan_path.name}")
+
+        # Extract requirements
+        requirements = self._extract_social_requirements(content, platform="facebook")
+
+        # Generate Facebook post draft
+        draft = await self._generate_facebook_draft(requirements)
+
+        # Create meaningful filename from topic
+        topic = requirements.get("topic", "post")
+        topic_slug = re.sub(r"[^a-zA-Z0-9\s]", "", topic)
+        topic_slug = re.sub(r"[\s]+", "-", topic_slug).lower()[:30]
+        if not topic_slug:
+            topic_slug = "post"
+        draft_filename = f"facebook_{topic_slug}.md"
+
+        # Save draft
+        draft_path = self.facebook_drafts_path / draft_filename
+
+        async with aiofiles.open(draft_path, "w", encoding="utf-8") as f:
+            await f.write(draft)
+
+        logger.info(f"[Orchestrator] Facebook draft saved: {draft_path.name}")
+        logger.info(f"[Orchestrator] Move to Facebook_Posts/Approved/ to publish")
+
+        # Move original request to Done
+        shutil.move(str(task_path), str(self.done_path / task_path.name))
+
+        await self._log_action("facebook_draft_created", task_path.name, {"draft": draft_path.name})
+
+    async def _generate_facebook_draft(self, requirements: dict) -> str:
+        """Generate Facebook post draft - community-focused, conversational."""
+        business_goals = await self._read_file(self.business_goals_path)
+        handbook = await self._read_file(self.handbook_path)
+
+        original_request = requirements.get("business_goals", "")
+
+        prompt = f"""Create a Facebook post.
+
+## User's Request:
+{original_request}
+
+## Platform Requirements:
+- Community-focused, conversational tone
+- Encourage engagement and discussion
+- 100-300 words works well
+- Ask questions to spark conversation
+- Can use emojis
+- Include a clear call-to-action
+- Share personal stories or insights
+
+## Business Context:
+{business_goals[:500] if business_goals else 'N/A'}
+
+## Company Rules:
+{handbook[:300] if handbook else 'N/A'}
+
+Output ONLY the post text, ready to post."""
+
+        draft_content = await self._call_claude(prompt)
+
+        if not draft_content:
+            draft_content = self._create_fallback_facebook_post(requirements)
+
+        # Format as proper draft
+        if "# Facebook Post Draft" not in draft_content:
+            draft_content = f"""# Facebook Post Draft
+
+## Status: DRAFT - AWAITING APPROVAL
+
+---
+
+## Post Content
+
+{draft_content}
+
+---
+
+**Platform:** Facebook
+**Generated:** {datetime.now().isoformat()}*
+
+---
+
+## Approval Instructions
+
+**To approve this post:**
+1. Review the content above
+2. Edit if needed
+3. Move this file to the `Approved` folder
+
+**To reject:**
+- Delete this file
+"""
+
+        return draft_content
+
+    def _create_fallback_facebook_post(self, requirements: dict) -> str:
+        """Create a fallback Facebook post."""
+        topic = requirements.get("topic", "business")
+
+        return f"""📢 Let's talk about {topic}!
+
+I've been thinking about this a lot lately, and I wanted to share some thoughts with our community.
+
+What I've learned:
+→ It's not about being perfect, it's about showing up
+→ Every challenge is an opportunity in disguise
+→ Community matters more than we realize
+
+I'd love to hear from you - what's one thing you've learned recently that surprised you?
+
+Drop a comment below and let's learn from each other! 💬
+
+Don't forget to like and share if this resonates with you! 👍"""
+
+    # ==================== SHARED SOCIAL METHODS ====================
+
+    def _create_social_plan(self, content: str, task_name: str, platform: str) -> str:
+        """Create a plan for social media post."""
+        platform_folder = f"{platform}_Posts"
+        if platform == "X (Twitter)":
+            platform_folder = "X_Posts"
+
+        return f"""# Plan: {platform} Post
+
+| Field | Value |
+|-------|-------|
+| **Task** | {task_name} |
+| **Type** | {platform} Post |
+| **Created** | {datetime.now().isoformat()} |
+| **Status** | AUTO-EXECUTED |
+
+## Original Request
+
+{content}
+
+## Execution Steps
+
+1. [x] Read requirements
+2. [x] Generate platform-specific post draft
+3. [x] Save to Draft folder
+4. [ ] Human moves to Approved to publish
+5. [ ] Publish to {platform}
+
+## Workflow
+
+- ✅ Plan auto-executed (no approval needed)
+- ✅ Draft generated and saved
+- ⏳ Awaiting human approval to **publish**
+- 📁 Move draft from `{platform_folder}/Draft/` to `{platform_folder}/Approved/`
+
+*Generated: {datetime.now().isoformat()}*
+"""
+
+    def _extract_social_requirements(self, content: str, platform: str = "social") -> dict:
+        """Extract requirements from social post request."""
+        requirements = {
+            "topic": None,
+            "tone": "engaging",
+            "hashtags": [],
+            "target_audience": None,
+            "business_goals": content,  # Full original request
+            "length": "medium",
+            "emoji": True,
+            "include_cta": True,
+        }
+
+        content_lower = content.lower()
+
+        # Extract topic
+        topic_patterns = [
+            r"(?:topic|subject|about|write about):\s*([^\n]+)",
+            r"create a (?:social |twitter |facebook )?post (?:about|on)\s*:?\s*([^\n]+)",
+            r"write a post (?:about|on)\s*:?\s*([^\n]+)",
+        ]
+        for pattern in topic_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                requirements["topic"] = match.group(1).strip()
+                break
+
+        # Extract hashtags
+        hashtags = re.findall(r"#\w+", content)
+        if hashtags:
+            requirements["hashtags"] = hashtags
+
+        # Platform-specific adjustments
+        if platform == "x":
+            requirements["length"] = "engaging"
+        elif platform == "facebook":
+            requirements["length"] = "medium"
+
+        return requirements
+
     def _create_plan(self, content: str, metadata: dict, task_name: str) -> str:
         """Create a plan.md."""
         source = metadata.get("source", "email")
@@ -609,6 +1180,62 @@ Drop a comment below{emoji_fire}
                 except Exception as e:
                     logger.error(f"[Orchestrator] LinkedIn publish failed: {approved_file.name}: {e}")
                     await self._log_action("linkedin_post_error", approved_file.name, {"error": str(e)})
+
+        # Check X (Twitter) Approved folder
+        if self.x_approved_path.exists() and self.x_poster:
+            for approved_file in list(self.x_approved_path.glob("*.md")):
+                try:
+                    logger.info(f"[Orchestrator] Publishing X (Twitter) post: {approved_file.name}")
+                    success = await self.x_poster.publish_post(approved_file)
+                    if success:
+                        await self._log_action("x_post_published", approved_file.name, {})
+                    else:
+                        await self._log_action("x_post_failed", approved_file.name, {})
+                except Exception as e:
+                    logger.error(f"[Orchestrator] X publish failed: {approved_file.name}: {e}")
+                    await self._log_action("x_post_error", approved_file.name, {"error": str(e)})
+
+        # Check Facebook Approved folder
+        if self.facebook_approved_path.exists() and self.facebook_poster:
+            for approved_file in list(self.facebook_approved_path.glob("*.md")):
+                try:
+                    logger.info(f"[Orchestrator] Publishing Facebook post: {approved_file.name}")
+                    success = await self.facebook_poster.publish_post(approved_file)
+                    if success:
+                        await self._log_action("facebook_post_published", approved_file.name, {})
+                    else:
+                        await self._log_action("facebook_post_failed", approved_file.name, {})
+                except Exception as e:
+                    logger.error(f"[Orchestrator] Facebook publish failed: {approved_file.name}: {e}")
+                    await self._log_action("facebook_post_error", approved_file.name, {"error": str(e)})
+
+        # Check X (Twitter) Approved folder
+        if self.x_approved_path.exists() and self.x_poster:
+            for approved_file in list(self.x_approved_path.glob("*.md")):
+                try:
+                    logger.info(f"[Orchestrator] Publishing X (Twitter) post: {approved_file.name}")
+                    success = await self.x_poster.publish_post(approved_file)
+                    if success:
+                        await self._log_action("x_post_published", approved_file.name, {})
+                    else:
+                        await self._log_action("x_post_failed", approved_file.name, {})
+                except Exception as e:
+                    logger.error(f"[Orchestrator] X publish failed: {approved_file.name}: {e}")
+                    await self._log_action("x_post_error", approved_file.name, {"error": str(e)})
+
+        # Check Facebook Approved folder
+        if self.facebook_approved_path.exists() and self.facebook_poster:
+            for approved_file in list(self.facebook_approved_path.glob("*.md")):
+                try:
+                    logger.info(f"[Orchestrator] Publishing Facebook post: {approved_file.name}")
+                    success = await self.facebook_poster.publish_post(approved_file)
+                    if success:
+                        await self._log_action("facebook_post_published", approved_file.name, {})
+                    else:
+                        await self._log_action("facebook_post_failed", approved_file.name, {})
+                except Exception as e:
+                    logger.error(f"[Orchestrator] Facebook publish failed: {approved_file.name}: {e}")
+                    await self._log_action("facebook_post_error", approved_file.name, {"error": str(e)})
 
     async def _execute_approved(self, draft_path: Path, source: str = None) -> None:
         """Execute an approved draft - folder presence = approval."""
@@ -713,6 +1340,9 @@ Drop a comment below{emoji_fire}
         separator_count = 0
         in_body = False
 
+        # Check if this is a WhatsApp message
+        is_whatsapp = "**Source:** whatsapp" in content or "source" in content.lower() and content.lower().find("whatsapp") > 0
+
         for line in lines:
             # Count separators to skip metadata section
             if line.strip() == "---":
@@ -748,6 +1378,9 @@ Drop a comment below{emoji_fire}
                 continue
 
             if in_body:
+                # For WhatsApp: skip the **Message:** label
+                if is_whatsapp and ("**Message:**" in line or line.startswith("**Message:**")):
+                    continue
                 body_lines.append(line)
 
         # Clean up
@@ -755,6 +1388,9 @@ Drop a comment below{emoji_fire}
         # Remove leading/trailing separators
         body = re.sub(r"^-{3,}\n?", "", body)
         body = re.sub(r"\n-{3,}$", "", body)
+        # For WhatsApp: also remove **Message:** label
+        if is_whatsapp:
+            body = re.sub(r"^\*\*Message:\*\*\s*", "", body)
         return body.strip()
 
     async def _check_daily_post(self) -> None:
@@ -843,6 +1479,18 @@ Generate now."""
             if match:
                 metadata[key] = match.group(1).strip()
 
+        # Simple line patterns (To: email@example.com)
+        if not metadata.get("to"):
+            to_match = re.search(r"^## To:\s*(.+)$", content, re.MULTILINE)
+            if to_match:
+                metadata["to"] = to_match.group(1).strip()
+
+        # Extract subject from ## Subject: line
+        if metadata.get("subject") == "No Subject":
+            subj_match = re.search(r"^## Subject:\s*(.+)$", content, re.MULTILINE)
+            if subj_match:
+                metadata["subject"] = subj_match.group(1).strip()
+
         # Use 'to' as contact if contact is empty
         if not metadata.get("contact") and metadata.get("to"):
             metadata["contact"] = metadata["to"]
@@ -890,7 +1538,17 @@ Generate now."""
         if flags.get("reasons"):
             flags_section = f"\n## ⚠️ Flags\n{chr(10).join(f'- {r}' for r in flags['reasons'])}\n"
 
-        prompt = f"""You are an AI assistant. Generate a professional response.
+        # WhatsApp responses should be shorter
+        is_whatsapp = source.lower() == "whatsapp"
+
+        if is_whatsapp:
+            prompt = f"""Generate a SHORT WhatsApp response (1-2 sentences max).
+
+Message: {content}
+
+Response:"""
+        else:
+            prompt = f"""You are an AI assistant. Generate a professional response.
 
 ## Company Rules
 {handbook}
@@ -907,12 +1565,24 @@ Generate a professional response. Do NOT include any checkboxes or approval mark
         draft = await self._call_claude(prompt)
 
         if not draft:
-            draft = f"""Thank you for your message. I'll respond with details shortly.
+            draft = f"""Thank you for your message. I'll respond with details shortly."""
+
+        # For WhatsApp, keep it brief - just the message
+        if is_whatsapp:
+            draft_with_metadata = f"""---
+
+**Source:** whatsapp
+**To:** {contact}
+
+---
+
+**Message:**
+{draft}
 
 *Generated: {datetime.now().isoformat()}*"""
-
-        # Add metadata header to preserve source and contact
-        draft_with_metadata = f"""---
+        else:
+            # Add metadata header to preserve source and contact
+            draft_with_metadata = f"""---
 
 **Source:** {source}
 **To:** {contact}
@@ -985,6 +1655,74 @@ Generate a professional response. Do NOT include any checkboxes or approval mark
 
         async with aiofiles.open(log_file, "a", encoding="utf-8") as f:
             await f.write(json.dumps(log_entry) + "\n")
+
+        # Update summary files when posts are published
+        if action in ["linkedin_post_published", "x_post_published", "facebook_post_published"]:
+            await self._update_social_summary()
+
+        # Also update when drafts are created
+        if action in ["linkedin_draft_created", "x_draft_created", "facebook_draft_created"]:
+            await self._update_social_summary()
+
+    async def _update_social_summary(self) -> None:
+        """Update SUMMARY.md files in each social media folder."""
+        platforms = [
+            ("LinkedIn", self.linkedin_posts_path, self.linkedin_drafts_path, self.linkedin_done_path),
+            ("X", self.x_posts_path, self.x_drafts_path, self.x_done_path),
+            ("Facebook", self.facebook_posts_path, self.facebook_drafts_path, self.facebook_done_path),
+        ]
+
+        for platform_name, base_path, drafts_path, done_path in platforms:
+            summary_path = base_path / "SUMMARY.md"
+
+            # Count files
+            draft_files = list(drafts_path.glob("*.md")) if drafts_path.exists() else []
+            done_files = list(done_path.glob("*.md")) if done_path.exists() else []
+
+            # Build summary content
+            summary = f"# {platform_name} Posts Summary\n\n"
+            summary += f"**Drafts:** {len(draft_files)} | **Published:** {len(done_files)}\n\n"
+            summary += "---\n\n"
+
+            if done_files:
+                summary += f"## Published Posts ({len(done_files)})\n\n"
+                for i, done_file in enumerate(done_files, 1):
+                    # Read content and extract post content
+                    try:
+                        content = done_file.read_text(encoding="utf-8")
+                        # Find the post content section
+                        lines = content.split("\n")
+                        post_content = ""
+                        in_post_content = False
+                        first_dash_found = False
+                        for line in lines:
+                            if "## Post Content" in line:
+                                in_post_content = True
+                                continue
+                            if in_post_content:
+                                # First --- after post content marks end
+                                if line.strip() == "---":
+                                    if first_dash_found:
+                                        break
+                                    first_dash_found = True
+                                    continue
+                                if line.strip():
+                                    post_content += line + " "
+                        # Get first 60 chars of actual content
+                        title = post_content.strip()[:60] if post_content.strip() else done_file.stem
+                        if len(title) > 60:
+                            title = title[:57] + "..."
+                    except:
+                        title = done_file.stem
+                    summary += f"{i}. {title}\n"
+            else:
+                summary += "## Published Posts\n\n_No posts published yet_\n"
+
+            summary += f"\n---\n\n*Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
+
+            # Write summary
+            summary_path.write_text(summary, encoding="utf-8")
+            logger.info(f"[Orchestrator] Updated {platform_name} summary: {summary_path.name}")
 
 
 async def main():

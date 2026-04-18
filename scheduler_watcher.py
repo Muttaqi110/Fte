@@ -3,6 +3,12 @@ Scheduler Watcher - Monitors /Scheduled folder for delayed task execution.
 
 Reads files with `execute_at: YYYY-MM-DD HH:MM` header and moves them
 to /Needs_Action when the scheduled time arrives.
+
+Supports repeat schedules:
+- once: Single execution (default)
+- daily: Execute every day
+- weekly: Execute every week on the same day
+- custom: Execute every X days
 """
 
 import asyncio
@@ -12,6 +18,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from enum import Enum
 
 import aiofiles
 
@@ -20,12 +27,19 @@ from base_watcher import BaseWatcher
 logger = logging.getLogger(__name__)
 
 
+class RepeatType(Enum):
+    ONCE = "once"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    CUSTOM = "custom"
+
+
 class SchedulerWatcher(BaseWatcher):
     """
     Scheduler watcher that monitors /Scheduled folder.
 
     Reads scheduled tasks and moves them to /Needs_Action when
-    their execute_at time arrives.
+    their execute_at time arrives. Supports repeat schedules.
     """
 
     def __init__(
@@ -109,19 +123,24 @@ class SchedulerWatcher(BaseWatcher):
             async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
                 content = await f.read()
 
-            # Parse execute_at from content
-            execute_at = self._parse_execute_at(content)
+            # Parse schedule metadata
+            schedule_info = self._parse_schedule_metadata(content)
 
-            if not execute_at:
+            if not schedule_info.get("execute_at"):
                 logger.warning(f"[{self.name}] No execute_at found in {file_path.name}")
                 return
+
+            execute_at = schedule_info["execute_at"]
+            repeat_type = schedule_info.get("repeat_type", RepeatType.ONCE)
+            repeat_days = schedule_info.get("repeat_days", 1)
+            repeat_end = schedule_info.get("repeat_end")
 
             # Check if time has arrived
             if now >= execute_at:
                 logger.info(f"[{self.name}] Executing scheduled task: {file_path.name}")
 
-                # Move to Needs_Action
-                dest_path = self.needs_action_path / file_path.name
+                # Create task content for Needs_Action
+                task_content = self._strip_schedule_metadata(content)
 
                 # Add execution metadata
                 execution_note = f"""
@@ -134,36 +153,102 @@ class SchedulerWatcher(BaseWatcher):
 |-------|-------|
 | **Scheduled For** | {execute_at.isoformat()} |
 | **Executed At** | {now.isoformat()} |
+| **Repeat Type** | {repeat_type.value} |
 | **Status** | Moved to Needs_Action |
 
 ---
 
 *This task was automatically moved from /Scheduled to /Needs_Action*
 """
+                task_content_with_meta = task_content + execution_note
 
-                async with aiofiles.open(file_path, "a", encoding="utf-8") as f:
-                    await f.write(execution_note)
+                # Save to Needs_Action
+                dest_path = self.needs_action_path / file_path.name
+                async with aiofiles.open(dest_path, "w", encoding="utf-8") as f:
+                    await f.write(task_content_with_meta)
 
-                # Move file
-                file_path.rename(dest_path)
+                # Handle repeat schedules
+                if repeat_type != RepeatType.ONCE:
+                    await self._handle_repeat_schedule(
+                        file_path,
+                        execute_at,
+                        repeat_type,
+                        repeat_days,
+                        repeat_end,
+                        content
+                    )
+                else:
+                    # Remove original file for one-time tasks
+                    file_path.unlink()
 
                 # Log
-                await self._log_action(file_path.name, execute_at, now)
+                await self._log_action(file_path.name, execute_at, now, repeat_type.value)
 
         except Exception as e:
             logger.error(f"[{self.name}] Error processing {file_path.name}: {e}")
 
-    def _parse_execute_at(self, content: str) -> Optional[datetime]:
+    async def _handle_repeat_schedule(
+        self,
+        file_path: Path,
+        last_execute_at: datetime,
+        repeat_type: RepeatType,
+        repeat_days: int,
+        repeat_end: Optional[datetime],
+        original_content: str,
+    ) -> None:
         """
-        Parse execute_at datetime from file content.
+        Update the scheduled file for the next execution.
 
-        Supports formats:
-        - execute_at: 2026-04-01 08:00
-        - execute_at: 2026-04-01T08:00:00
-        - scheduled: tomorrow 9am
-        - scheduled: in 2 hours
+        Args:
+            file_path: Path to the scheduled file
+            last_execute_at: The execution time that just passed
+            repeat_type: Type of repeat schedule
+            repeat_days: Custom repeat days (for custom type)
+            repeat_end: End date for repeat (if set)
+            original_content: Original file content
         """
-        # Try ISO format first
+        # Calculate next execution time
+        if repeat_type == RepeatType.DAILY:
+            next_execute = last_execute_at + timedelta(days=1)
+        elif repeat_type == RepeatType.WEEKLY:
+            next_execute = last_execute_at + timedelta(weeks=1)
+        elif repeat_type == RepeatType.CUSTOM:
+            next_execute = last_execute_at + timedelta(days=repeat_days)
+        else:
+            return
+
+        # Check if past end date
+        if repeat_end and next_execute > repeat_end:
+            logger.info(f"[{self.name}] Repeat schedule ended for {file_path.name}")
+            file_path.unlink()
+            return
+
+        # Update the file with new execute_at
+        new_content = self._update_execute_at(original_content, next_execute)
+
+        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+            await f.write(new_content)
+
+        logger.info(
+            f"[{self.name}] Updated repeat schedule for {file_path.name}: "
+            f"next execution at {next_execute.isoformat()}"
+        )
+
+    def _parse_schedule_metadata(self, content: str) -> dict:
+        """
+        Parse schedule metadata from file content.
+
+        Returns:
+            dict with execute_at, repeat_type, repeat_days, repeat_end
+        """
+        result = {
+            "execute_at": None,
+            "repeat_type": RepeatType.ONCE,
+            "repeat_days": 1,
+            "repeat_end": None,
+        }
+
+        # Parse execute_at (supports both ISO and space format)
         iso_match = re.search(
             r"execute_at:\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)",
             content,
@@ -173,11 +258,52 @@ class SchedulerWatcher(BaseWatcher):
         if iso_match:
             date_str = iso_match.group(1).replace(" ", "T")
             try:
-                return datetime.fromisoformat(date_str)
+                result["execute_at"] = datetime.fromisoformat(date_str)
             except ValueError:
                 pass
 
-        # Try relative time formats
+        # Parse repeat_type
+        repeat_match = re.search(
+            r"repeat_type:\s*(once|daily|weekly|custom)",
+            content,
+            re.IGNORECASE
+        )
+        if repeat_match:
+            result["repeat_type"] = RepeatType(repeat_match.group(1).lower())
+
+        # Parse repeat_days
+        repeat_days_match = re.search(
+            r"repeat_days:\s*(\d+)",
+            content,
+            re.IGNORECASE
+        )
+        if repeat_days_match:
+            result["repeat_days"] = int(repeat_days_match.group(1))
+
+        # Parse repeat_end
+        repeat_end_match = re.search(
+            r"repeat_end:\s*(\d{4}-\d{2}-\d{2})",
+            content,
+            re.IGNORECASE
+        )
+        if repeat_end_match:
+            try:
+                result["repeat_end"] = datetime.fromisoformat(repeat_end_match.group(1))
+            except ValueError:
+                pass
+
+        # Parse relative time formats if no ISO date
+        if not result["execute_at"]:
+            result["execute_at"] = self._parse_relative_time(content)
+
+        return result
+
+    def _parse_relative_time(self, content: str) -> Optional[datetime]:
+        """
+        Parse relative time formats.
+
+        Supports: "tomorrow 9am", "in 2 hours", "in 30 minutes"
+        """
         relative_match = re.search(
             r"(?:execute_at|scheduled):\s*(.+)",
             content,
@@ -188,10 +314,8 @@ class SchedulerWatcher(BaseWatcher):
             relative_str = relative_match.group(1).strip().lower()
             now = datetime.now()
 
-            # Parse relative times
             if "tomorrow" in relative_str:
                 tomorrow = now + timedelta(days=1)
-                # Try to extract time
                 time_match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", relative_str)
                 if time_match:
                     hour = int(time_match.group(1))
@@ -202,7 +326,6 @@ class SchedulerWatcher(BaseWatcher):
                 return tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
 
             if "in" in relative_str:
-                # "in 2 hours", "in 30 minutes"
                 hours_match = re.search(r"in\s+(\d+)\s+hours?", relative_str)
                 mins_match = re.search(r"in\s+(\d+)\s+minutes?", relative_str)
 
@@ -213,11 +336,49 @@ class SchedulerWatcher(BaseWatcher):
 
         return None
 
+    def _strip_schedule_metadata(self, content: str) -> str:
+        """Remove YAML frontmatter from content."""
+        # Remove YAML frontmatter
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                return parts[2].strip()
+        return content
+
+    def _update_execute_at(self, content: str, new_execute_at: datetime) -> str:
+        """Update the execute_at value in content."""
+        new_date_str = new_execute_at.strftime("%Y-%m-%d %H:%M")
+
+        # Update existing execute_at
+        if "execute_at:" in content:
+            return re.sub(
+                r"execute_at:\s*[\d\-T: ]+",
+                f"execute_at: {new_date_str}",
+                content
+            )
+
+        # Add frontmatter if not present
+        if not content.startswith("---"):
+            return f"""---
+execute_at: {new_date_str}
+---
+
+{content}
+"""
+
+        # Add execute_at to existing frontmatter
+        return re.sub(
+            r"^---\n",
+            f"---\nexecute_at: {new_date_str}\n",
+            content
+        )
+
     async def _log_action(
         self,
         filename: str,
         scheduled_time: datetime,
         executed_time: datetime,
+        repeat_type: str = "once",
     ) -> None:
         """Log action to JSON file."""
         log_entry = {
@@ -227,6 +388,7 @@ class SchedulerWatcher(BaseWatcher):
             "filename": filename,
             "scheduled_for": scheduled_time.isoformat(),
             "executed_at": executed_time.isoformat(),
+            "repeat_type": repeat_type,
         }
 
         log_file = self.logs_path / f"scheduler_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
@@ -240,6 +402,9 @@ def create_scheduled_task(
     execute_at: datetime,
     scheduled_path: Path,
     task_name: Optional[str] = None,
+    repeat_type: str = "once",
+    repeat_days: int = 1,
+    repeat_end: Optional[datetime] = None,
 ) -> Path:
     """
     Helper function to create a scheduled task file.
@@ -249,6 +414,9 @@ def create_scheduled_task(
         execute_at: When to execute the task
         scheduled_path: Path to Scheduled folder
         task_name: Optional task name (default: auto-generated)
+        repeat_type: "once", "daily", "weekly", or "custom"
+        repeat_days: Days between executions (for custom)
+        repeat_end: End date for repeat schedule
 
     Returns:
         Path to created file
@@ -262,14 +430,22 @@ def create_scheduled_task(
 
     filename = f"{timestamp}_scheduled_{slug}.md"
 
-    # Add execute_at header if not present
-    if "execute_at:" not in task_content:
-        task_content = f"""---
+    # Build frontmatter
+    frontmatter = f"""---
 execute_at: {execute_at.strftime("%Y-%m-%d %H:%M")}
----
-
-{task_content}
+repeat_type: {repeat_type}
 """
+    if repeat_type == "custom":
+        frontmatter += f"repeat_days: {repeat_days}\n"
+
+    if repeat_end:
+        frontmatter += f"repeat_end: {repeat_end.strftime('%Y-%m-%d')}\n"
+
+    frontmatter += "---\n\n"
+
+    # Add frontmatter if not present
+    if "execute_at:" not in task_content:
+        task_content = frontmatter + task_content
 
     file_path = scheduled_path / filename
     file_path.write_text(task_content, encoding="utf-8")

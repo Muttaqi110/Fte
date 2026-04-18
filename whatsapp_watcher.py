@@ -4,6 +4,8 @@ WhatsApp Watcher - Monitors WhatsApp Web for messages.
 Uses Playwright to automate WhatsApp Web, saves all unread messages
 to whatsapp_inbox and copies to Needs_Action.
 Marks messages as read after downloading by opening and closing the chat.
+
+Includes retry logic with exponential backoff for transient errors.
 """
 
 import asyncio
@@ -18,6 +20,7 @@ from typing import Optional, Set
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from base_watcher import BaseWatcher
+from retry_handler import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +297,12 @@ class WhatsAppWatcher(BaseWatcher):
             # Close the chat to mark messages as read
             await self._close_chat()
 
+            # Go back to home/chat list
+            await self._go_home()
+
+            # Go back to home/chat list
+            await self._go_home()
+
         except Exception as e:
             logger.error(f"[{self.name}] Failed to process {chat_name}: {e}")
 
@@ -350,6 +359,60 @@ class WhatsAppWatcher(BaseWatcher):
 
         except Exception as e:
             logger.debug(f"[{self.name}] Close chat failed: {e}")
+
+    async def _go_home(self) -> None:
+        """Close search list if open and go to home/main chat list."""
+        try:
+            # Check if search box is active/focused and close it
+            search_active = await self._page.query_selector('[data-testid="search"]:focus-within, [data-testid="search"].focus')
+            if search_active:
+                # Press Escape to close search
+                await self._page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+                logger.debug(f"[{self.name}] Closed search list via Escape")
+
+            # Also try clicking anywhere in the chat list area to ensure we're in the main view
+            # This helps if we're stuck in search results
+            chat_list = await self._page.query_selector('[data-testid="chat-list"]')
+            if chat_list:
+                await chat_list.click()
+                await asyncio.sleep(0.3)
+
+            # Press Escape one more time just in case
+            await self._page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+
+            logger.debug(f"[{self.name}] Returned to home/chat list")
+
+        except Exception as e:
+            logger.debug(f"[{self.name}] Go home failed: {e}")
+
+    async def _go_home(self) -> None:
+        """Close search list if open and go to home/main chat list."""
+        try:
+            # Check if search box is active/focused and close it
+            search_active = await self._page.query_selector('[data-testid="search"]:focus-within, [data-testid="search"].focus')
+            if search_active:
+                # Press Escape to close search
+                await self._page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+                logger.debug(f"[{self.name}] Closed search list via Escape")
+
+            # Also try clicking anywhere in the chat list area to ensure we're in the main view
+            # This helps if we're stuck in search results
+            chat_list = await self._page.query_selector('[data-testid="chat-list"]')
+            if chat_list:
+                await chat_list.click()
+                await asyncio.sleep(0.3)
+
+            # Press Escape one more time just in case
+            await self._page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+
+            logger.debug(f"[{self.name}] Returned to home/chat list")
+
+        except Exception as e:
+            logger.debug(f"[{self.name}] Go home failed: {e}")
 
     async def _mark_chat_as_read(self, chat_name: str) -> None:
         """Open and close a chat to mark it as read."""
@@ -424,6 +487,8 @@ class WhatsAppWatcher(BaseWatcher):
         slug = re.sub(r"[\s_]+", "-", slug)
         return slug.strip("-").lower() or "chat"
 
+    @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
+    @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
     async def send_message(self, contact_name: str, message: str) -> dict:
         """
         Send a WhatsApp message to a contact.
@@ -479,6 +544,9 @@ class WhatsAppWatcher(BaseWatcher):
 
             # Close the chat so new messages show as unread
             await self._close_chat()
+
+            # Go back to home/chat list
+            await self._go_home()
 
             logger.info(f"[{self.name}] Message sent to {contact_name} and chat closed")
             return {"success": True}
