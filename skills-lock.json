@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "generate-ceo-briefing": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "83c85f18b2edafe70401186b0a6627ea3ebd495a4a6869e5ed125d5b6c508a43"
+    }
+  }
+}

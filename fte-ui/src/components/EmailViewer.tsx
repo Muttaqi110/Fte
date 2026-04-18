@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 
-type Source = 'gmail' | 'whatsapp' | 'linkedin';
+type Source = 'gmail' | 'whatsapp' | 'linkedin' | 'x' | 'facebook' | 'odoo';
 
 interface EmailViewerProps {
   content: string;
@@ -33,12 +33,15 @@ export function EmailViewer({
     setIsEditing(false);
   }, [content, filename]);
 
-  // Determine folder type - use activeSource for linkedin
-  const isDraft = folder.includes('/Draft') || folder === 'linkedin_post';
+  // Determine folder type - use activeSource for social posts
+  const isDraft = folder.includes('/Draft') || folder === 'linkedin_post' || folder === 'x_post' || folder === 'facebook_post';
   const isApproved = folder.includes('/Approved');
   const isDone = folder.includes('/Done');
   const isNeedsAction = folder === 'Needs_Action';
   const isLinkedInPost = activeSource === 'linkedin' && (folder.includes('LinkedIn_Posts') || folder === 'linkedin_post');
+  const isXPost = activeSource === 'x' && (folder.includes('X_Posts') || folder === 'x_post');
+  const isFacebookPost = activeSource === 'facebook' && (folder.includes('Facebook_Posts') || folder === 'facebook_post');
+  const isSocialPost = isLinkedInPost || isXPost || isFacebookPost;
 
   const handleApprove = async () => {
     console.log('handleApprove called', { filename, folder, activeSource });
@@ -97,13 +100,24 @@ export function EmailViewer({
 
     // Plain format: **To:** value
     const toPlainMatch = editedContent.match(/\*\*To:\*\*\s*([^\n]+)/);
+    const fromPlainMatch = editedContent.match(/\*\*From:\*\*\s*([^\n]+)/);
+    const subjectPlainMatch = editedContent.match(/\*\*Subject:\*\*\s*([^\n]+)/);
     const sourcePlainMatch = editedContent.match(/\*\*Source:\*\*\s*([^\n]+)/);
 
+    // Determine if draft
+    const isDraftFolder = folder.includes('Draft') || folder === 'linkedin_post';
+
+    const from = fromMatch?.[1]?.trim() || contactMatch?.[1]?.trim() || fromPlainMatch?.[1]?.trim() || '';
+    const to = toMatch?.[1]?.trim() || toPlainMatch?.[1]?.trim() || '';
+    const subject = subjectMatch?.[1]?.trim() || subjectPlainMatch?.[1]?.trim() || '';
+    const source = sourceMatch?.[1]?.trim() || sourcePlainMatch?.[1]?.trim() || (isLinkedInPost ? 'LinkedIn' : 'Email');
+
     return {
-      from: fromMatch?.[1]?.trim() || contactMatch?.[1]?.trim() || 'Unknown',
-      to: toMatch?.[1]?.trim() || toPlainMatch?.[1]?.trim() || '',
-      subject: subjectMatch?.[1]?.trim() || 'No Subject',
-      source: sourceMatch?.[1]?.trim() || sourcePlainMatch?.[1]?.trim() || (isLinkedInPost ? 'LinkedIn' : 'Email'),
+      from,
+      to,
+      subject,
+      source,
+      isDraft: isDraftFolder,
     };
   };
 
@@ -112,8 +126,16 @@ export function EmailViewer({
   // Get approve button text based on source
   const getApproveButtonText = () => {
     if (saving) return 'Saving...';
-    if (isLinkedInPost) return 'Approve & Publish';
+    if (isSocialPost) return 'Approve & Publish';
     return 'Approve & Send';
+  };
+
+  // Get platform name for display
+  const getPlatformName = () => {
+    if (isLinkedInPost) return 'LinkedIn';
+    if (isXPost) return 'X (Twitter)';
+    if (isFacebookPost) return 'Facebook';
+    return null;
   };
 
   return (
@@ -125,26 +147,32 @@ export function EmailViewer({
             {getTitle()}
           </h2>
           <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-            {!isLinkedInPost && (
+            {!isSocialPost && (
               <>
-                <span>From: <span className="text-gray-400">{metadata.from}</span></span>
-                {metadata.subject && <span>Subject: <span className="text-gray-400">{metadata.subject}</span></span>}
+                {metadata.isDraft ? (
+                  <span>To: <span className="text-gray-400">{metadata.to || 'Recipient'}</span></span>
+                ) : (
+                  <span>From: <span className="text-gray-400">{metadata.from || 'Unknown'}</span></span>
+                )}
+                {metadata.subject && metadata.subject !== 'No Subject' && (
+                  <span>Subject: <span className="text-gray-400">{metadata.subject}</span></span>
+                )}
               </>
             )}
-            {isLinkedInPost && (
-              <span className="text-purple-400">LinkedIn Post</span>
+            {isSocialPost && (
+              <span className="text-purple-400">{getPlatformName()} Post</span>
             )}
           </div>
         </div>
         <div className="flex gap-2">
           {isDone ? (
             <span className="px-3 py-1.5 text-sm bg-gray-800 text-gray-500 rounded-full flex items-center gap-1 border border-gray-700">
-              <span>✓</span> {isLinkedInPost ? 'Published' : 'Completed'}
+              <span>✓</span> {isSocialPost ? 'Published' : 'Completed'}
             </span>
           ) : isApproved ? (
             <div className="flex gap-2">
               <span className="px-3 py-1.5 text-sm bg-green-900/30 text-green-400 rounded-full flex items-center gap-1 border border-green-800">
-                <span>✓</span> Approved - Pending {isLinkedInPost ? 'Publish' : 'Send'}
+                <span>✓</span> Approved - Pending {isSocialPost ? 'Publish' : 'Send'}
               </span>
             </div>
           ) : isDraft ? (
@@ -213,7 +241,7 @@ export function EmailViewer({
       {!isDone && !isApproved && (
         <div className="p-3 border-t border-purple-900/50 bg-[#1a1a1a] flex items-center justify-between text-sm text-gray-500">
           <span>
-            {isDraft ? `Edit the content above and approve to ${isLinkedInPost ? 'publish' : 'send'}` : 'Waiting for draft to be generated'}
+            {isDraft ? `Edit the content above and approve to ${isSocialPost ? 'publish' : 'send'}` : 'Waiting for draft to be generated'}
           </span>
           <div className="flex gap-2">
             <button

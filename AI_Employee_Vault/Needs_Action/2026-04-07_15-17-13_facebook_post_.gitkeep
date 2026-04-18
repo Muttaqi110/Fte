@@ -1,0 +1,25 @@
+# Facebook Post Request
+
+## Status: PENDING - AWAITING CLAUDE CODE PROCESSING
+
+---
+
+## Original Request
+
+
+
+---
+
+## Processing Instructions
+
+1. Claude Code should read this request
+2. Create a plan in Plans/ folder
+3. Generate Facebook post draft
+4. Save draft to Facebook_Posts/Draft/ folder
+
+---
+
+**Platform:** Facebook
+**Source:** .gitkeep
+**Detected:** 2026-04-07T15:17:13.369171
+**Moved to Needs_Action:** 2026-04-07T15:17:13.369183

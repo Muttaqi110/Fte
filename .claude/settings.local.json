@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(python:*)",
+      "Bash(mkdir -p /d/Programming/AAID/Hackathons/New/Fte/.claude/skills)",
+      "Bash(mv /d/Programming/AAID/Hackathons/New/Fte/.claude/commands/audit.md /d/Programming/AAID/Hackathons/New/Fte/.claude/skills/audit.md)",
+      "Bash(/d/Programming/AAID/Hackathons/New/Fte/.claude/skills/audit.md:*)",
+      "Bash(mkdir -p /d/Programming/AAID/Hackathons/New/Fte/.claude/commands)",
+      "Bash(mv /d/Programming/AAID/Hackathons/New/Fte/.claude/skills/audit.md /d/Programming/AAID/Hackathons/New/Fte/.claude/commands/audit.md)"
+    ]
+  }
+}

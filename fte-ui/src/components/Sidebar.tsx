@@ -1,6 +1,6 @@
 'use client';
 
-type Source = 'gmail' | 'whatsapp' | 'linkedin';
+type Source = 'gmail' | 'whatsapp' | 'linkedin' | 'x' | 'facebook' | 'odoo';
 
 interface EmailListProps {
   files: Array<{
@@ -38,48 +38,76 @@ export function EmailList({ files, selectedFile, onSelect, folder, activeSource 
   const getFileInfo = (file: { name: string; content: string }) => {
     const content = file.content;
 
-    // Try to extract title
-    const titleMatch = content.match(/^#\s+(.+)$/m);
-    let title = titleMatch ? titleMatch[1] : file.name.replace('.md', '').replace(/_/g, ' ');
+    // Determine if draft folder
+    const isDraft = folder.includes('Draft') || folder.includes('draft');
 
-    // Extract source
-    const sourceMatch = content.match(/\*\*Source\*\*\s*\|\s*([^|]+)/i);
-    const source = sourceMatch?.[1]?.trim()?.toLowerCase() || '';
-
-    // Extract contact/from
-    const contactMatch = content.match(/\*\*Contact\*\*\s*\|\s*([^|]+)/i);
+    // Extract From (for inbox items)
     const fromMatch = content.match(/\*\*From\*\*\s*\|\s*([^|]+)/i);
-    const contact = contactMatch?.[1]?.trim() || fromMatch?.[1]?.trim() || '';
+    const contactMatch = content.match(/\*\*Contact\*\*\s*\|\s*([^|]+)/i);
+    const fromName = fromMatch?.[1]?.trim() || contactMatch?.[1]?.trim() || '';
 
-    // Extract subject
+    // Extract To (for drafts)
+    const toMatch = content.match(/\*\*To\*\*\s*\|\s*([^|]+)/i);
+    const toName = toMatch?.[1]?.trim() || '';
+
+    // Extract Subject
     const subjectMatch = content.match(/\*\*Subject\*\*\s*\|\s*([^|]+)/i);
     const subject = subjectMatch?.[1]?.trim() || '';
 
-    // Determine type
-    const isWhatsApp = source.includes('whatsapp') || file.name.includes('whatsapp');
-    const isLinkedIn = source.includes('linkedin') || file.name.includes('linkedin') || folder.includes('linkedin');
-    const isGmail = source.includes('email') || source.includes('gmail') || (!isWhatsApp && !isLinkedIn);
+    // Determine source type based on activeSource and folder
+    const isWhatsApp = activeSource === 'whatsapp';
+    const isLinkedIn = activeSource === 'linkedin';
+    const isX = activeSource === 'x';
+    const isFacebook = activeSource === 'facebook';
+    const isGmail = activeSource === 'gmail';
+    const isOdoo = activeSource === 'odoo';
 
-    // Get display title
-    let displayTitle = title;
-    if (contact && !title.includes(contact)) {
-      displayTitle = contact;
-    } else if (subject && subject !== 'No Subject') {
-      displayTitle = subject;
+    // Create clean display title
+    let displayTitle = '';
+    let subtitle = '';
+
+    if (isOdoo) {
+      // For Odoo invoices: extract client and amount
+      const clientMatch = content.match(/\*\*Name:\*\*\s*(.+)/i);
+      const amountMatch = content.match(/\*\*TOTAL:\*\*\s*\$?([\d,]+)/i);
+      const invoiceIdMatch = content.match(/"invoice_id":\s*(\d+)/);
+
+      displayTitle = clientMatch?.[1]?.trim() || 'Invoice';
+      subtitle = amountMatch ? `$${amountMatch[1]}` : (invoiceIdMatch ? `ID: ${invoiceIdMatch[1]}` : '');
+    } else if (isDraft || folder.includes('_post')) {
+      // For drafts and post requests: show filename or topic
+      const topicMatch = content.match(/\*\*Topic:\*\*\s*([^\n]+)/i);
+      displayTitle = topicMatch?.[1]?.trim() || file.name.replace('.md', '').slice(0, 30);
+      subtitle = folder.includes('_post') ? 'Post Request' : 'Draft';
+    } else {
+      // For inbox: show sender name
+      displayTitle = fromName || 'Unknown Sender';
+      subtitle = subject && subject !== 'No Subject' ? subject : '';
     }
 
+    // Get platform-specific styling
+    const getPlatformStyle = () => {
+      if (isWhatsApp) return { icon: '💬', bgColor: 'bg-green-500/10' };
+      if (isLinkedIn) return { icon: '💼', bgColor: 'bg-blue-500/10' };
+      if (isX) return { icon: '✖️', bgColor: 'bg-gray-500/10' };
+      if (isFacebook) return { icon: '📘', bgColor: 'bg-blue-500/10' };
+      if (isOdoo) return { icon: '🧾', bgColor: 'bg-purple-500/10' };
+      return { icon: '📧', bgColor: 'bg-red-500/10' };
+    };
+
+    const style = getPlatformStyle();
+
     return {
-      title: displayTitle.slice(0, 40) + (displayTitle.length > 40 ? '...' : ''),
-      contact: contact.slice(0, 30),
-      source: isWhatsApp ? 'whatsapp' : isLinkedIn ? 'linkedin' : 'gmail',
-      icon: isWhatsApp ? '💬' : isLinkedIn ? '💼' : '📧',
-      color: isWhatsApp ? 'text-green-400' : isLinkedIn ? 'text-purple-400' : 'text-red-400',
-      bgColor: isWhatsApp ? 'bg-green-500/10' : isLinkedIn ? 'bg-purple-500/10' : 'bg-red-500/10',
+      title: displayTitle.slice(0, 30) + (displayTitle.length > 30 ? '...' : ''),
+      subtitle: subtitle.slice(0, 35),
+      source: activeSource,
+      icon: style.icon,
+      bgColor: style.bgColor,
     };
   };
 
   return (
-    <div className="divide-y divide-purple-900/30">
+    <div className="py-2">
       {files.length === 0 ? (
         <div className="p-8 text-center">
           <div className="text-4xl mb-2 opacity-50">📭</div>
@@ -88,30 +116,32 @@ export function EmailList({ files, selectedFile, onSelect, folder, activeSource 
       ) : (
         files.map((file) => {
           const info = getFileInfo(file);
+          const isSelected = selectedFile === file.name;
           return (
             <button
               key={file.name}
               onClick={() => onSelect(file.name)}
-              className={`w-full text-left p-3 hover:bg-purple-900/20 transition-all ${
-                selectedFile === file.name
-                  ? 'bg-purple-900/30 border-l-2 border-purple-500'
+              className={`w-full text-left px-4 py-3 hover:bg-purple-900/20 transition-all ${
+                isSelected
+                  ? 'bg-purple-900/30 border-l-2 border-purple-400'
                   : 'border-l-2 border-transparent'
               }`}
             >
-              <div className="flex items-start gap-2">
-                <span className="text-lg mt-0.5">{info.icon}</span>
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${info.bgColor}`}>
+                  <span className="text-sm">{info.icon}</span>
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate text-gray-200">
                     {info.title}
                   </div>
-                  {info.contact && info.contact !== info.title && (
-                    <div className="text-xs text-gray-500 truncate mt-0.5">
-                      {info.contact}
+                  {info.subtitle && (
+                    <div className="text-xs text-gray-400 truncate">
+                      {info.subtitle}
                     </div>
                   )}
-                  <div className="text-xs text-gray-600 mt-1 flex justify-between">
-                    <span>{formatDate(file.modified)}</span>
-                    <span>{(file.size / 1024).toFixed(1)} KB</span>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {formatDate(file.modified)}
                   </div>
                 </div>
               </div>

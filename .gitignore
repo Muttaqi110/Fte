@@ -40,14 +40,6 @@ ENV/
 *.log
 *.jsonl
 
-# Email data (contains sensitive content)
-AI_Employee_Vault/Inbox/*.md
-AI_Employee_Vault/Needs_Action/*.md
-AI_Employee_Vault/Draft/*.md
-AI_Employee_Vault/Done/*.md
-AI_Employee_Vault/Logs/*.jsonl
-AI_Employee_Vault/Logs/processed_ids.json
-
 # Keep folder structure
 !AI_Employee_Vault/**/.gitkeep
 
@@ -59,3 +51,8 @@ credentials.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Profiles
+.linkedin_poster_profile
+.x_poster_profile
+.facebook_poster_profile

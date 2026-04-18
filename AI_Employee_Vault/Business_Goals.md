@@ -1,67 +1,55 @@
-# Business Goals
+# Business Goals & Performance Metrics
 
-Define your business objectives for proactive AI assistance.
+## Metadata
 
-## Target Audience
-
-- Primary: [Define your target customers]
-- Secondary: [Secondary audience]
-
-## Value Proposition
-
-[What makes your product/service unique]
-
-## Key Offerings
-
-1. **Offering 1**: [Description]
-2. **Offering 2**: [Description]
-3. **Offering 3**: [Description]
-
-## LinkedIn Content Strategy
-
-### Themes
-- Thought leadership
-- Industry insights
-- Product updates
-- Customer success stories
-- Behind-the-scenes
-
-### Posting Schedule
-- Frequency: Daily / Weekly
-- Best times: [Your timezone preferences]
-
-### Call-to-Action
-[What action should readers take?]
-
-## Business Keywords (WhatsApp Monitoring)
-
-Add keywords that trigger WhatsApp notifications:
-
-```
-- pricing
-- quote
-- proposal
-- meeting
-- contract
-- urgent
-- deadline
-- project
-- collaboration
-- partnership
-```
-
-## Sales Goals
-
-- Monthly target: [Amount/Units]
-- Current progress: [Status]
-
-## Key Contacts
-
-| Name | Role | Company | Priority |
-|------|------|---------|----------|
-| [Name] | [Role] | [Company] | High/Medium/Low |
+| Field | Value |
+|-------|-------|
+| last_updated | 2026-04-09 |
+| review_frequency | weekly |
+| document_type | CEO Briefing Baseline |
+| next_review | 2026-04-14 |
 
 ---
 
-*Last Updated: 2026-03-31*
-*Update this file with your actual business information*
+## Q1 2026 Objectives
+
+### Revenue Target
+
+| Metric | Value |
+|--------|-------|
+| Monthly Goal | $10,000 |
+| Month-to-Date (MTD) | $4,500 |
+| Status | **ON TRACK** |
+
+**Context:** The AI should track progress against this target to determine if the business is "On track". If MTD revenue falls below 70% of the proportional target, flag as "At Risk".
+
+---
+
+## Key Metrics Table
+
+| Metric | Target | Alert Threshold |
+|--------|--------|----------------|
+| Client Response Time | < 24 hours | > 48 hours |
+| Invoice Payment Rate | > 90% | < 80% |
+| Software Costs | < $500/month | > $600/month |
+
+---
+
+## Active Projects
+
+| Project | Due Date | Budget | Status |
+|---------|---------|--------|--------|
+| Project Alpha | 2026-04-15 | $2,000 | Done |
+| Project Beta | 2026-04-30 | $3,500 | In Progress |
+
+---
+
+## Notes
+
+- This file serves as the **Long-Term Memory** and baseline for the Reasoning Layer during weekly business audits
+- Update after each Monday Morning CEO Briefing
+- Track trends over time to identify patterns
+
+---
+
+*Business Goals baseline established: 2026-04-09*

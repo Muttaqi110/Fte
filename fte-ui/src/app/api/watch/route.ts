@@ -16,37 +16,47 @@ if (typeof window === 'undefined') {
   const folders = [
     'Inbox', 'whatsapp_inbox', 'linkedin_inbox',
     'Needs_Action', 'Plans', 'Pending_Approval',
-    'Approved', 'Rejected', 'Done', 'Scheduled', 'Logs'
+    'Approved', 'Rejected', 'Done', 'Scheduled', 'Logs',
+    'linkedin_post', 'x_post', 'facebook_post',
+    'Gmail_Messages/Draft', 'Gmail_Messages/Approved', 'Gmail_Messages/Done',
+    'WhatsApp_Messages/Draft', 'WhatsApp_Messages/Approved', 'WhatsApp_Messages/Done',
+    'LinkedIn_Posts/Draft', 'LinkedIn_Posts/Approved', 'LinkedIn_Posts/Done',
+    'X_Posts/Draft', 'X_Posts/Approved', 'X_Posts/Done',
+    'Facebook_Posts/Draft', 'Facebook_Posts/Approved', 'Facebook_Posts/Done',
   ];
 
   folders.forEach(folder => {
     const folderPath = path.join(VAULT_PATH, folder);
 
     // Ensure folder exists
-    if (!fs.existsSync(folderPath)) {
-      fs.mkdirSync(folderPath, { recursive: true });
-    }
-
-    // Use native fs.watch for real-time updates
-    fs.watch(folderPath, (eventType, filename) => {
-      if (filename && filename.endsWith('.md')) {
-        const event = {
-          type: eventType,
-          folder,
-          filename,
-          timestamp: new Date().toISOString(),
-        };
-
-        // Broadcast to all connected clients
-        clients.forEach(client => {
-          try {
-            client.enqueue(`data: ${JSON.stringify(event)}\n\n`);
-          } catch {
-            // Client disconnected
-          }
-        });
+    try {
+      if (!fs.existsSync(folderPath)) {
+        fs.mkdirSync(folderPath, { recursive: true });
       }
-    });
+
+      // Use native fs.watch for real-time updates
+      fs.watch(folderPath, (eventType, filename) => {
+        if (filename && filename.endsWith('.md')) {
+          const event = {
+            type: eventType,
+            folder,
+            filename,
+            timestamp: new Date().toISOString(),
+          };
+
+          // Broadcast to all connected clients
+          clients.forEach(client => {
+            try {
+              client.enqueue(`data: ${JSON.stringify(event)}\n\n`);
+            } catch {
+              // Client disconnected
+            }
+          });
+        }
+      });
+    } catch (err) {
+      // Folder might not exist, skip
+    }
   });
 }
 
