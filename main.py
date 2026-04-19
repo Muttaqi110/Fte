@@ -56,7 +56,7 @@ async def run_system():
         # Error recovery folders
         "Outbox_Queue", "Human_Review_Queue", "Quarantine",
         # Social Media
-        "Social_Media/linkedin_post", "Social_Media/x_post", "Social_Media/facebook_post",
+        "Social_Media/linkedin_post_request", "Social_Media/x_post_request", "Social_Media/facebook_post_request",
         "Social_Media/LinkedIn_Posts/Draft", "Social_Media/LinkedIn_Posts/Approved", "Social_Media/LinkedIn_Posts/Done",
         "Social_Media/X_Posts/Draft", "Social_Media/X_Posts/Approved", "Social_Media/X_Posts/Done",
         "Social_Media/Facebook_Posts/Draft", "Social_Media/Facebook_Posts/Approved", "Social_Media/Facebook_Posts/Done",
@@ -128,7 +128,7 @@ async def run_system():
             needs_action_path=vault_path / "Needs_Action",
             logs_path=logs_path,
             business_goals_path=vault_path / "Business_Goals.md",
-            poll_interval=30.0,
+            poll_interval=15.0,
             headless=os.getenv("WHATSAPP_HEADLESS", "false").lower() == "true",
         )
         manager.add_watcher(whatsapp_watcher)
@@ -142,13 +142,13 @@ async def run_system():
     # ==================== LINKEDIN POST WATCHER ====================
     try:
         from linkedin_post_watcher import LinkedInPostWatcher
-        linkedin_post_watcher = LinkedInPostWatcher(
-            linkedin_post_path=vault_path / "Social_Media" / "linkedin_post",
+        linkedin_post_request_watcher = LinkedInPostWatcher(
+            linkedin_post_request_path=vault_path / "Social_Media" / "linkedin_post_request",
             needs_action_path=vault_path / "Needs_Action",
             logs_path=logs_path,
             poll_interval=10.0,
         )
-        manager.add_watcher(linkedin_post_watcher)
+        manager.add_watcher(linkedin_post_request_watcher)
         logger.info("LinkedIn post watcher initialized")
     except ImportError:
         logger.warning("LinkedIn post watcher not available")
@@ -203,16 +203,16 @@ async def run_system():
         logger.warning(f"SendMail watcher failed: {e}")
 
     # ==================== LINKEDIN POSTER ====================
-    linkedin_poster = None
+    linkedin_post_requester = None
     try:
         from linkedin_poster import LinkedInPoster
-        linkedin_poster = LinkedInPoster(
+        linkedin_post_requester = LinkedInPoster(
             approved_path=vault_path / "Social_Media" / "LinkedIn_Posts" / "Approved",
             done_path=vault_path / "Social_Media" / "LinkedIn_Posts" / "Done",
             logs_path=logs_path,
             headless=os.getenv("LINKEDIN_HEADLESS", "false").lower() == "true",
         )
-        await linkedin_poster.startup()
+        await linkedin_post_requester.startup()
         logger.info("LinkedIn poster initialized")
     except ImportError:
         logger.warning("LinkedIn poster not available (playwright not installed)")
@@ -344,7 +344,7 @@ async def run_system():
         poll_interval=5.0,
         gmail_watcher=gmail_watcher,
         whatsapp_watcher=whatsapp_watcher,
-        linkedin_poster=linkedin_poster,
+        linkedin_poster=linkedin_post_requester,
         x_poster=x_poster,
         facebook_poster=facebook_poster,
         send_mail_watcher=send_mail_watcher,
@@ -355,8 +355,8 @@ async def run_system():
         logger.info(f"Received signal {signum}, shutting down...")
         manager.stop_all()
         orchestrator.stop()
-        if linkedin_poster:
-            asyncio.create_task(linkedin_poster.shutdown())
+        if linkedin_post_requester:
+            asyncio.create_task(linkedin_post_requester.shutdown())
         if x_poster:
             asyncio.create_task(x_poster.shutdown())
         if facebook_poster:

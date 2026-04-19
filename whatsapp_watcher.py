@@ -95,22 +95,44 @@ class WhatsAppWatcher(BaseWatcher):
 
         # Navigate to WhatsApp Web
         logger.info(f"[{self.name}] Navigating to WhatsApp Web...")
-        await self._page.goto("https://web.whatsapp.com", wait_until="domcontentloaded", timeout=60000)
-
-        # Wait for app to load
+        await self._page.goto("https://web.whatsapp.com", wait_until="networkidle", timeout=60000)
         await asyncio.sleep(3)
 
-        # Check if logged in
-        try:
-            await self._page.wait_for_selector('[data-testid="chat-list"]', timeout=30000)
-            logger.info(f"[{self.name}] WhatsApp Web loaded - logged in")
-        except:
-            logger.warning(f"[{self.name}] Waiting for QR code scan...")
+        # Check state using JavaScript - look for QR code or chat list
+        page_state = await self._page.evaluate("""() => {
+            const qr = document.querySelector('[data-testid="qrcode"], canvas, img[alt*="QR"]');
+            const side = document.querySelector('#pane-side, [data-testid="chat-list"]');
+            const app = document.querySelector('[data-testid="app"]');
+            return {
+                hasQR: !!qr,
+                hasChatList: !!side,
+                hasApp: !!app,
+                url: window.location.href
+            };
+        }""")
+
+        logger.debug(f"[{self.name}] Page state: {page_state}")
+
+        if page_state.get("hasQR") and not page_state.get("hasChatList"):
+            logger.warning(f"[{self.name}] QR code detected - please scan within 5 minutes...")
+            # Wait for login - check both QR disappearance and chat list appearance
             try:
-                await self._page.wait_for_selector('[data-testid="chat-list"]', timeout=120000)
+                await self._page.wait_for_function(
+                    """() => {
+                        const qr = document.querySelector('[data-testid="qrcode"], canvas, img[alt*="QR"]');
+                        const side = document.querySelector('#pane-side, [data-testid="chat-list"]');
+                        return !qr || side;
+                    }""",
+                    timeout=300000  # 5 minutes for QR scan
+                )
                 logger.info(f"[{self.name}] Login detected!")
-            except:
-                logger.error(f"[{self.name}] Login timeout - please restart and scan QR code")
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"[{self.name}] QR scan timeout: {e}")
+                return False
+        else:
+            # Already logged in
+            logger.info(f"[{self.name}] WhatsApp Web loaded - logged in")
 
     async def shutdown(self) -> None:
         """Cleanup browser."""
@@ -296,9 +318,19 @@ class WhatsAppWatcher(BaseWatcher):
 
             # Close the chat to mark messages as read
             await self._close_chat()
+            await asyncio.sleep(0.5)
 
-            # Go back to home/chat list
-            await self._go_home()
+            # Clear search explicitly before going home
+            try:
+                search = await self._page.query_selector('[data-testid="search"] input')
+                if search:
+                    await search.click()
+                    await asyncio.sleep(0.2)
+                    await self._page.keyboard.press("Control+A")
+                    await self._page.keyboard.press("Backspace")
+                    await asyncio.sleep(0.3)
+            except Exception as e:
+                logger.debug(f"[{self.name}] Search clear failed: {e}")
 
             # Go back to home/chat list
             await self._go_home()
@@ -361,64 +393,26 @@ class WhatsAppWatcher(BaseWatcher):
             logger.debug(f"[{self.name}] Close chat failed: {e}")
 
     async def _go_home(self) -> None:
-        """Close search list if open and go to home/main chat list."""
+        """Go back to main WhatsApp chat list - reload page."""
         try:
-            # Check if search box is active/focused and close it
-            search_active = await self._page.query_selector('[data-testid="search"]:focus-within, [data-testid="search"].focus')
-            if search_active:
-                # Press Escape to close search
-                await self._page.keyboard.press("Escape")
-                await asyncio.sleep(0.5)
-                logger.debug(f"[{self.name}] Closed search list via Escape")
+            logger.info(f"[{self.name}] Going home...")
 
-            # Also try clicking anywhere in the chat list area to ensure we're in the main view
-            # This helps if we're stuck in search results
-            chat_list = await self._page.query_selector('[data-testid="chat-list"]')
-            if chat_list:
-                await chat_list.click()
-                await asyncio.sleep(0.3)
+            # Most reliable: just reload the main WhatsApp page
+            await self._page.goto("https://web.whatsapp.com", wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(2)
 
-            # Press Escape one more time just in case
-            await self._page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
-
-            logger.debug(f"[{self.name}] Returned to home/chat list")
+            logger.info(f"[{self.name}] Returned to home/chat list")
 
         except Exception as e:
-            logger.debug(f"[{self.name}] Go home failed: {e}")
-
-    async def _go_home(self) -> None:
-        """Close search list if open and go to home/main chat list."""
-        try:
-            # Check if search box is active/focused and close it
-            search_active = await self._page.query_selector('[data-testid="search"]:focus-within, [data-testid="search"].focus')
-            if search_active:
-                # Press Escape to close search
-                await self._page.keyboard.press("Escape")
-                await asyncio.sleep(0.5)
-                logger.debug(f"[{self.name}] Closed search list via Escape")
-
-            # Also try clicking anywhere in the chat list area to ensure we're in the main view
-            # This helps if we're stuck in search results
-            chat_list = await self._page.query_selector('[data-testid="chat-list"]')
-            if chat_list:
-                await chat_list.click()
-                await asyncio.sleep(0.3)
-
-            # Press Escape one more time just in case
-            await self._page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
-
-            logger.debug(f"[{self.name}] Returned to home/chat list")
-
-        except Exception as e:
-            logger.debug(f"[{self.name}] Go home failed: {e}")
+            logger.error(f"[{self.name}] Go home failed: {e}")
 
     async def _mark_chat_as_read(self, chat_name: str) -> None:
-        """Open and close a chat to mark it as read."""
+        """Open and close a chat to mark it as read, then go home."""
         await self._open_chat(chat_name)
         await asyncio.sleep(1)
         await self._close_chat()
+        await asyncio.sleep(0.5)
+        await self._go_home()
         logger.debug(f"[{self.name}] Marked as read: {chat_name}")
 
     async def _get_messages(self) -> str:
@@ -514,33 +508,35 @@ class WhatsAppWatcher(BaseWatcher):
 
             # Find the message input box
             input_selectors = [
-                '[data-testid="conversation-compose-box-input"]',
                 'div[contenteditable="true"][data-tab="10"]',
+                '[data-testid="conversation-compose-box-input"]',
                 'footer div[contenteditable="true"]',
-                '#main div[contenteditable="true"]',
+                '#main div[contenteditable="true"][role="textbox"]',
             ]
 
             input_box = None
             for selector in input_selectors:
                 input_box = await self._page.query_selector(selector)
                 if input_box:
+                    logger.debug(f"[{self.name}] Found input with: {selector}")
                     break
 
             if not input_box:
                 logger.error(f"[{self.name}] Could not find message input")
-                # Close chat before returning
                 await self._close_chat()
                 return {"success": False, "error": "Message input not found"}
 
-            # Type the message
+            # Click to focus
             await input_box.click()
-            await asyncio.sleep(0.5)
-            await input_box.fill(message)
+            await asyncio.sleep(0.3)
+
+            # Type message character by character (more reliable for contenteditable)
+            await input_box.type(message, delay=20)
             await asyncio.sleep(0.5)
 
             # Send by pressing Enter
             await self._page.keyboard.press("Enter")
-            await asyncio.sleep(1)
+            await asyncio.sleep(1.5)
 
             # Close the chat so new messages show as unread
             await self._close_chat()

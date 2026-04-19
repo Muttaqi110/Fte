@@ -1,7 +1,7 @@
 """
 LinkedIn Post Request Watcher - Monitors for new post requirements.
 
-Watches linkedin_post/ folder for new requirement files.
+Watches linkedin_post_request/ folder for new requirement files.
 When detected, moves them to Needs_Action/ for Claude Code to process.
 """
 
@@ -21,7 +21,7 @@ class LinkedInPostWatcher(BaseWatcher):
     Watches for LinkedIn post requirements.
 
     Flow:
-    1. Human creates requirement file in linkedin_post/
+    1. Human creates requirement file in linkedin_post_request/
     2. This watcher detects it
     3. Moves file to Needs_Action/
     4. Claude Code reads it and creates plan/draft
@@ -29,7 +29,7 @@ class LinkedInPostWatcher(BaseWatcher):
 
     def __init__(
         self,
-        linkedin_post_path: Path,
+        linkedin_post_request_path: Path,
         needs_action_path: Path,
         logs_path: Path,
         poll_interval: float = 10.0,
@@ -39,14 +39,14 @@ class LinkedInPostWatcher(BaseWatcher):
         Initialize the LinkedIn post watcher.
 
         Args:
-            linkedin_post_path: Path to linkedin_post folder (human input)
+            linkedin_post_request_path: Path to linkedin_post_request folder (human input)
             needs_action_path: Path to Needs_Action folder
             logs_path: Path to Logs folder
             poll_interval: Seconds between checks
         """
         super().__init__(poll_interval=poll_interval, **kwargs)
 
-        self.linkedin_post_path = Path(linkedin_post_path)
+        self.linkedin_post_request_path = Path(linkedin_post_request_path)
         self.needs_action_path = Path(needs_action_path)
         self.logs_path = Path(logs_path)
 
@@ -58,13 +58,13 @@ class LinkedInPostWatcher(BaseWatcher):
 
     async def startup(self) -> None:
         """Initialize directories."""
-        self.linkedin_post_path.mkdir(parents=True, exist_ok=True)
+        self.linkedin_post_request_path.mkdir(parents=True, exist_ok=True)
         self.needs_action_path.mkdir(parents=True, exist_ok=True)
         self.logs_path.mkdir(parents=True, exist_ok=True)
 
         # Don't skip existing files - process them on startup
         # Only skip files that have already been moved (tracked in logs)
-        logger.info(f"[{self.name}] Watching {self.linkedin_post_path}")
+        logger.info(f"[{self.name}] Watching {self.linkedin_post_request_path}")
 
     async def shutdown(self) -> None:
         """Cleanup."""
@@ -77,7 +77,7 @@ class LinkedInPostWatcher(BaseWatcher):
         Returns:
             True if poll succeeded
         """
-        current_files = set(f.name for f in self.linkedin_post_path.glob("*") if f.is_file())
+        current_files = set(f.name for f in self.linkedin_post_request_path.glob("*") if f.is_file())
 
         # Log current state for debugging
         logger.debug(f"[{self.name}] Current files: {current_files}")
@@ -90,7 +90,7 @@ class LinkedInPostWatcher(BaseWatcher):
             logger.info(f"[{self.name}] Found {len(new_files)} new file(s) to process")
 
         for filename in new_files:
-            file_path = self.linkedin_post_path / filename
+            file_path = self.linkedin_post_request_path / filename
 
             if not file_path.is_file():
                 continue
@@ -108,7 +108,7 @@ class LinkedInPostWatcher(BaseWatcher):
     async def _move_to_needs_action(self, file_path: Path) -> None:
         """Move file to Needs_Action folder with timestamp."""
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        new_filename = f"{timestamp}_linkedin_post_{file_path.name}"
+        new_filename = f"{timestamp}_linkedin_post_request_{file_path.name}"
         dest_path = self.needs_action_path / new_filename
 
         # Read content
@@ -158,12 +158,12 @@ class LinkedInPostWatcher(BaseWatcher):
 
         log_entry = {
             "timestamp": datetime.now().isoformat(),
-            "source": "linkedin_post_watcher",
+            "source": "linkedin_post_request_watcher",
             "action": action,
             "details": details,
         }
 
-        log_file = self.logs_path / f"linkedin_post_watcher_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+        log_file = self.logs_path / f"linkedin_post_request_watcher_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
 
@@ -181,7 +181,7 @@ async def main():
     vault_path = Path("AI_Employee_Vault")
 
     watcher = LinkedInPostWatcher(
-        linkedin_post_path=vault_path / "Social_Media" / "linkedin_post",
+        linkedin_post_request_path=vault_path / "Social_Media" / "linkedin_post_request",
         needs_action_path=vault_path / "Needs_Action",
         logs_path=vault_path / "Logs",
         poll_interval=10.0,

@@ -1,14 +1,13 @@
 # Facebook Posts Summary
 
-**Drafts:** 0 | **Published:** 2
+**Drafts:** 0 | **Published:** 0
 
 ---
 
-## Published Posts (2)
+## Published Posts
 
-1. **Why We Should All Learn AI (Even If You're Not a "Tech Per
-2. **Why We Should All Learn AI (Even If You're Not a "Tech Per
+_No posts published yet_
 
 ---
 
-*Updated: 2026-04-19 00:12:06*
+*Updated: 2026-04-19 13:47:39*

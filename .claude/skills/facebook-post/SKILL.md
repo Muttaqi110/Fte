@@ -46,7 +46,7 @@ Post about: launching new ai product
 ## Executing the Skill
 
 When invoked:
-1. Create post request file in `AI_Employee_Vault/Social_Media/facebook_post/`
+1. Create post request file in `AI_Employee_Vault/Social_Media/facebook_post_request/`
 2. Poll Draft folder every 15 seconds (max 12 attempts = 3 minutes)
 3. Once draft appears, show it to user for approval
 4. Instruct user to move to Approved/ to publish

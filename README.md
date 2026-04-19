@@ -164,7 +164,7 @@ Auto-send message → WhatsApp_Messages/Done/
 
 ### Social Media Posts (LinkedIn, X, Facebook)
 ```
-Create requirement in Social_Media/[platform]_post/
+Create requirement in Social_Media/[platform]_post_request/
         ↓
 Watcher moves to Needs_Action/
         ↓
@@ -221,9 +221,9 @@ AI_Employee_Vault/
 │   ├── Odoo_Invoices/  # Invoice workflow
 │   └── Odoo_Bills/     # Bill workflow
 ├── Social_Media/
-│   ├── linkedin_post/      # LinkedIn post requirements
-│   ├── x_post/             # X (Twitter) post requirements
-│   ├── facebook_post/     # Facebook post requirements
+│   ├── linkedin_post_request/      # LinkedIn post requirements
+│   ├── x_post_request/             # X (Twitter) post requirements
+│   ├── facebook_post_request/     # Facebook post requirements
 │   ├── LinkedIn_Posts/
 │   │   ├── Draft/
 │   │   ├── Approved/
@@ -287,9 +287,9 @@ AI_Employee_Vault/
 | `orchestrator.py` | Process tasks, generate drafts |
 | `gmail_watcher.py` | Gmail API integration |
 | `whatsapp_watcher.py` | WhatsApp Web automation |
-| `linkedin_post_watcher.py` | Monitors linkedin_post folder |
+| `linkedin_post_watcher.py` | Monitors linkedin_post_request folder |
 | `linkedin_poster.py` | Publishes approved posts to LinkedIn |
-| `social_post_watcher.py` | Monitors x_post, facebook_post folders |
+| `social_post_watcher.py` | Monitors x_post_request, facebook_post_request folders |
 | `x_poster.py` | Publishes approved posts to X (Twitter) |
 | `facebook_poster.py` | Publishes approved posts to Facebook |
 | `scheduler_watcher.py` | Delayed task execution with repeat schedules (daily, weekly, custom) |

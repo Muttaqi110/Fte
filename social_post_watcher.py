@@ -1,7 +1,7 @@
 """
 Social Post Watcher - Monitors for new social media post requirements.
 
-Watches x_post/, facebook_post/ folders for new requirement files.
+Watches x_post_request_request/, facebook_post/ folders for new requirement files.
 When detected, moves them to Needs_Action/ for Claude Code to process.
 """
 
@@ -22,7 +22,7 @@ class SocialPostWatcher(BaseWatcher):
     Watches for social media post requirements.
 
     Flow:
-    1. Human creates requirement file in x_post/ or facebook_post/
+    1. Human creates requirement file in x_post_request_request/ or facebook_post/
     2. This watcher detects it
     3. Moves file to Needs_Action/
     4. Claude Code reads it and creates plan/draft
@@ -30,9 +30,9 @@ class SocialPostWatcher(BaseWatcher):
 
     # Platform-specific folders (under Social_Media/)
     PLATFORM_FOLDERS = {
-        "x": "Social_Media/x_post",
-        "twitter": "Social_Media/x_post",
-        "facebook": "Social_Media/facebook_post",
+        "x": "Social_Media/x_post_request",
+        "twitter": "Social_Media/x_post_request",
+        "facebook": "Social_Media/facebook_post_request_request",
     }
 
     def __init__(
