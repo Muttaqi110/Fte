@@ -32,7 +32,7 @@ class SocialPostWatcher(BaseWatcher):
     PLATFORM_FOLDERS = {
         "x": "Social_Media/x_post_request",
         "twitter": "Social_Media/x_post_request",
-        "facebook": "Social_Media/facebook_post_request_request",
+        "facebook": "Social_Media/facebook_post_request",
     }
 
     def __init__(
