@@ -88,6 +88,7 @@ while attempt < max_attempts:
     time.sleep(15)
     attempt += 1
 ```
+If draft does not appear in 3 minutes, inform user to wait or to check any issue
 
 ## Parsing Tips
 

@@ -52,6 +52,7 @@ When invoked:
 2. Poll Draft folder every 15 seconds (max 12 attempts = 3 minutes)
 3. Once draft appears, show it to user for approval
 4. Instruct user to move to Approved/ to publish
+If draft does not appear in 3 minutes, inform user to wait or to check any issue
 
 ## Draft Detection
 

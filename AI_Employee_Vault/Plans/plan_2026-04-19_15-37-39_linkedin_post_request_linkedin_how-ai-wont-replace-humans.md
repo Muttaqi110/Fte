@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 2026-04-19_13-45-10_linkedin_post_request_request_2026-04-19_13-42-00_ai-wont-replace-humans.md |
+| **Task** | 2026-04-19_15-37-39_linkedin_post_request_linkedin_how-ai-wont-replace-humans.md |
 | **Type** | LinkedIn Post |
-| **Created** | 2026-04-19T13:45:10.239545 |
+| **Created** | 2026-04-19T15:39:19.243882 |
 | **Status** | AUTO-EXECUTED |
 
 ## Original Request
@@ -19,20 +19,20 @@
 
 ---
 platform: linkedin
-type: opinion
+type: opinion_thought_leadership
 created: 2026-04-19
 ---
 
 # LinkedIn Post Request
 
-Post about: how AI won't replace humans
+Post about: how ai wont replace humans
 
 ## Details
 
-- **Topic:** AI as a tool, not a replacement
-- **Target audience:** Professionals, business leaders, tech enthusiasts
-- **Tone:** Thoughtful, reassuring, forward-looking
-- **Include:** Perspective on human-AI collaboration, why AI amplifies rather than replaces
+- **Topic:** AI augmentation vs replacement of human workers
+- **Target audience:** Professionals, tech leaders, HR professionals
+- **Tone:** Thoughtful, balanced, optimistic
+- **Include:** Examples of AI-human collaboration, emphasis on uniquely human skills, call to action for responsible AI adoption
 
 ---
 
@@ -45,9 +45,9 @@ Post about: how AI won't replace humans
 
 ---
 
-**Source:** request_2026-04-19_13-42-00_ai-wont-replace-humans.md
-**Detected:** 2026-04-19T13:45:10.174769
-**Moved to Needs_Action:** 2026-04-19T13:45:10.175766
+**Source:** linkedin_how-ai-wont-replace-humans.md
+**Detected:** 2026-04-19T15:37:39.774174
+**Moved to Needs_Action:** 2026-04-19T15:37:39.774174
 
 
 ## Execution Steps
@@ -65,4 +65,4 @@ Post about: how AI won't replace humans
 - ⏳ Awaiting human approval to **publish**
 - 📁 Move draft from `LinkedIn_Posts/Draft/` to `LinkedIn_Posts/Approved/`
 
-*Generated: 2026-04-19T13:45:10.239545*
+*Generated: 2026-04-19T15:39:19.243882*
