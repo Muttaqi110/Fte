@@ -39,27 +39,15 @@ Post about: launching new ai product that helps small businesses
 ```
 
 
-## Executing the Skill - IMPORTANT: Follow These Steps IN ORDER
+## Executing the Skill- IMPORTANT: Follow These Steps IN ORDER
 
 **CRITICAL: Always start with Step 1. Never skip steps.**
 
-### Step 1: Create the Request File
+When invoked:
 1. Create post request file in `AI_Employee_Vault/Social_Media/linkedin_post_request/`
-2. The file must include:
-   - platform: linkedin
-   - type: (opinion_thought_leadership, business_update, etc.)
-   - created: today's date
-   - Post about: [the topic]
-   - Details section with Target audience, Tone, what to Include
-
-### Step 2: Wait for Draft
-The LinkedInPostWatcher will generate a draft in the Draft folder. Poll the Draft folder every 15 seconds (max 12 attempts = 3 minutes).
-
-### Step 3: Show Draft to User
-Once the draft appears in `Social_Media/LinkedIn_Posts/Draft/`, read and show it to the user for approval.
-
-### Step 4: Instructions
-Instruct the user to move the file to `Approved/` folder to publish.
+2. Poll Draft folder every 15 seconds (max 12 attempts = 3 minutes)
+3. Once draft appears, show it to user for approval
+4. Instruct user to move to Approved/ to publish
 
 ## Draft Detection
 
