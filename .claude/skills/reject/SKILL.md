@@ -25,23 +25,12 @@ When invoked:
 3. Move selected draft to Rejected folder
 4. Confirm action to user
 
-## Draft & Rejected Folders
-
-| Platform | Draft Folder | Rejected Folder |
-|----------|------------|---------------|
-| LinkedIn | Social_Media/LinkedIn_Posts/Draft/ | Social_Media/LinkedIn_Posts/Rejected/ |
-| X | Social_Media/X_Posts/Draft/ | Social_Media/X_Posts/Rejected/ |
-| Facebook | Social_Media/Facebook_Posts/Draft/ | Social_Media/Facebook_Posts/Rejected/ |
-| Email | Gmail/Gmail_Messages/Draft/ | Gmail/Gmail_Messages/Rejected/ |
-| WhatsApp | WhatsApp/WhatsApp_Messages/Draft/ | WhatsApp/WhatsApp_Messages/Rejected/ |
-| Invoice | Account/Odoo_Invoices/Draft/ | Account/Odoo_Invoices/Rejected/ |
 
 ## Executing the Skill
 
 1. Scan Draft folders for available files
 2. Ask user which one to reject (or auto-detect from context)
-3. Move file to respective Rejected folder
-4. Confirm action to user
+3. Delete the file
 
 ## Auto-Detection
 
