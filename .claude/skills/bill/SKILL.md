@@ -39,11 +39,13 @@ bill for digital ocean $50
 Optional notes about the bill
 ```
 
-## Executing the Skill
+## Executing the Skill- IMPORTANT: Follow These Steps IN ORDER
+
+**CRITICAL: Always start with Step 1. Never skip steps.**
 
 When invoked:
 1. Parse user input to extract vendor name and amount
-2. Create bill request file in `AI_Employee_Vault/Needs_Action/`
+2. Create bill request file in `AI_Employee_Vault/Account/send_bills`
 3. OdooBillWatcher will detect it, create draft in Odoo, and move to Odoo_Bills/Draft
 4. Poll Draft folder every 15 seconds (max 12 attempts = 3 minutes)
 5. Once draft appears, show user the Odoo status (bill_id, vendor_id)

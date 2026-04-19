@@ -5,7 +5,9 @@ description: Reject draft files and move them to Rejected folder. Use when user 
 
 # Reject Skill
 
-## Usage
+## Usage- IMPORTANT: Follow These Steps IN ORDER
+
+**CRITICAL: Always start with Step 1. Never skip steps.**
 
 ```
 reject the linkedin draft

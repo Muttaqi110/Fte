@@ -40,7 +40,9 @@ create invoice of $500 against Anum emails is anam.zehra.zaidi@gmail.com due dat
 ```
 
 
-## Executing the Skill
+## Executing the Skill- IMPORTANT: Follow These Steps IN ORDER
+
+**CRITICAL: Always start with Step 1. Never skip steps.**
 
 When invoked:
 1. Create invoice file in `AI_Employee_Vault/Needs_Action/`

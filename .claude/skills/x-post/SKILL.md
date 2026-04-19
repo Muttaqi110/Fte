@@ -44,7 +44,9 @@ Post about: launching new ai product
 - **Include:** Hashtags, call to action
 ```
 
-## Executing the Skill
+## Executing the Skill- IMPORTANT: Follow These Steps IN ORDER
+
+**CRITICAL: Always start with Step 1. Never skip steps.**
 
 When invoked:
 1. Create post request file in `AI_Employee_Vault/Social_Media/x_post_request/`
