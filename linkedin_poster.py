@@ -27,6 +27,8 @@ from typing import Optional, List, Dict, Any
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 
+from dashboard_updater import DashboardUpdater
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +45,7 @@ class LinkedInPoster:
         approved_path: Path,
         done_path: Path,
         logs_path: Path,
+        vault_path: Path = None,
         headless: bool = False,
         user_data_dir: Optional[str] = None,
     ):
@@ -53,6 +56,7 @@ class LinkedInPoster:
             approved_path: Path where approved posts wait for publishing
             done_path: Path where posted content is archived
             logs_path: Path to logs folder
+            vault_path: Path to AI_Employee_Vault (for dashboard updates)
             headless: Run browser in headless mode
             user_data_dir: Browser profile directory (defaults to project/.linkedin_profile)
         """
@@ -60,6 +64,8 @@ class LinkedInPoster:
         self.done_path = Path(done_path)
         self.logs_path = Path(logs_path)
         self.headless = headless
+        # Dashboard updater
+        self._dashboard_updater = DashboardUpdater(vault_path) if vault_path else None
         # Use project-local profile directory to avoid conflicts
         if user_data_dir:
             self.user_data_dir = Path(user_data_dir)
@@ -594,6 +600,10 @@ class LinkedInPoster:
             await self._log_action("post_published", post_path.stem, str(done_path))
 
             logger.info(f"[LinkedInPoster] Successfully posted: {done_filename}")
+
+            # Update dashboard
+            if self._dashboard_updater:
+                self._dashboard_updater.update_folder("linkedin_done")
 
             # Close browser after successful posting
             await self._close_browser()
