@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from base_watcher import BaseWatcher
+from dashboard_updater import DashboardUpdater
+from dashboard_updater import DashboardUpdater
 from retry_handler import with_retry, RetryExhaustedError
 
 logger = logging.getLogger(__name__)
@@ -674,11 +676,14 @@ class OdooInvoicePoster(BaseWatcher):
         self,
         odoo_invoices_path: Path,
         logs_path: Path,
+        vault_path: Path = None,
         poll_interval: float = 10.0,
     ):
         super().__init__(poll_interval=poll_interval)
         self.odoo_invoices_path = Path(odoo_invoices_path)
         self.logs_path = Path(logs_path)
+        # Dashboard updater
+        self._dashboard_updater = DashboardUpdater(vault_path) if vault_path else None
 
         # Subfolders
         self.approved_path = self.odoo_invoices_path / "Approved"
@@ -845,6 +850,10 @@ class OdooInvoicePoster(BaseWatcher):
                 # Move (not copy) the file
                 file_path.rename(pending_payment_path)
 
+                # Update dashboard
+                if self._dashboard_updater:
+                    self._dashboard_updater.update_folder("odoo_invoices_approved")
+
                 # Log action
                 log_entry = {
                     "timestamp": datetime.now().isoformat(),
@@ -977,6 +986,10 @@ class OdooInvoicePoster(BaseWatcher):
                     counter += 1
                 file_path.rename(done_path)
                 logger.info(f"[OdooInvoicePoster] Invoice {invoice_id} moved to Done")
+
+                # Update dashboard
+                if self._dashboard_updater:
+                    self._dashboard_updater.update_folder("odoo_invoices_done")
 
             except Exception as e:
                 logger.error(f"[OdooInvoicePoster] Error processing payment: {e}")

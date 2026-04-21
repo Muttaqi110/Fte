@@ -25,6 +25,8 @@ import json
 import requests
 
 from base_watcher import BaseWatcher
+from dashboard_updater import DashboardUpdater
+from dashboard_updater import DashboardUpdater
 
 logger = logging.getLogger("OdooBillWatcher")
 
@@ -544,6 +546,7 @@ class OdooBillPoster(BaseWatcher):
         self,
         odoo_bills_path: Path,
         logs_path: Path,
+        vault_path: Path = None,
         poll_interval: float = 10.0,
     ):
         super().__init__(
@@ -554,6 +557,8 @@ class OdooBillPoster(BaseWatcher):
         )
         self.odoo_bills_path = Path(odoo_bills_path)
         self.logs_path = Path(logs_path)
+        # Dashboard updater
+        self._dashboard_updater = DashboardUpdater(vault_path) if vault_path else None
 
         # Odoo connection
         self._odoo_url = None
@@ -673,6 +678,14 @@ class OdooBillPoster(BaseWatcher):
         shutil.move(str(bill_file), str(done_path / bill_file.name))
 
         logger.info(f"[OdooBillPoster] Bill completed: {bill_file.name}")
+
+        # Update dashboard
+        if self._dashboard_updater:
+            self._dashboard_updater.update_folder("odoo_bills_done")
+
+        # Update dashboard
+        if self._dashboard_updater:
+            self._dashboard_updater.update_folder("odoo_bills_done")
 
     async def _call_odoo(self, model: str, method: str, args: list) -> Dict:
         """Call Odoo API with proper authentication."""

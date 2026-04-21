@@ -26,6 +26,8 @@ from typing import Optional
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 
+from dashboard_updater import DashboardUpdater
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +44,7 @@ class XPoster:
         approved_path: Path,
         done_path: Path,
         logs_path: Path,
+        vault_path: Path = None,
         headless: bool = False,
         user_data_dir: Optional[str] = None,
     ):
@@ -52,12 +55,15 @@ class XPoster:
             approved_path: Path where approved posts wait for publishing
             done_path: Path where posted content is archived
             logs_path: Path to logs folder
+            vault_path: Path to AI_Employee_Vault (for dashboard updates)
             headless: Run browser in headless mode
             user_data_dir: Browser profile directory (defaults to project/.x_poster_profile)
         """
         self.approved_path = Path(approved_path)
         self.done_path = Path(done_path)
         self.logs_path = Path(logs_path)
+        # Dashboard updater
+        self._dashboard_updater = DashboardUpdater(vault_path) if vault_path else None
         self.headless = headless
         # Use project-local profile directory to avoid conflicts
         if user_data_dir:
@@ -470,6 +476,10 @@ class XPoster:
             await self._log_action("post_published", post_path.stem, str(done_path), post_text)
 
             logger.info(f"[XPoster] Successfully posted: {done_filename}")
+
+            # Update dashboard
+            if self._dashboard_updater:
+                self._dashboard_updater.update_folder("x_done")
 
             # Close browser after successful posting
             await self._close_browser()
