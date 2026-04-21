@@ -175,9 +175,8 @@ class SocialPostWatcher(BaseWatcher):
 
         logger.info(f"[{self.name}] Moved to Needs_Action: {new_filename}")
 
-        # Update dashboard - decrement request count, increment Needs_Action
-        self._dashboard_updater.update_folder(f"{platform}_post")
-        self._dashboard_updater.update_folder("needs_action")
+        # Update dashboard (full refresh)
+        self._dashboard_updater.update_all()
 
         # Log
         await self._log_action("moved_to_needs_action", str(dest_path), platform)

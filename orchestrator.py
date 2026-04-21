@@ -502,7 +502,7 @@ Format exactly as:
         shutil.move(str(task_path), str(self.done_path / task_path.name))
 
         await self._log_action("linkedin_draft_created", task_path.name, {"draft": draft_path.name})
-        await update_dashboard_on_action(self.vault_path, "draft_created", "linkedin_draft")
+        await update_dashboard_on_action(self.vault_path, "draft_created")
 
     def _create_linkedin_plan(self, content: str, task_name: str) -> str:
         """Create a plan for LinkedIn post."""
@@ -833,7 +833,7 @@ Drop a comment below{emoji_fire}
         shutil.move(str(task_path), str(self.done_path / task_path.name))
 
         await self._log_action("x_draft_created", task_path.name, {"draft": draft_path.name})
-        await update_dashboard_on_action(self.vault_path, "draft_created", "x_draft")
+        await update_dashboard_on_action(self.vault_path, "draft_created")
 
     async def _generate_x_draft(self, requirements: dict) -> str:
         """Generate X (Twitter) post draft - short, punchy, hashtag-rich."""
@@ -952,7 +952,7 @@ Output ONLY the post text, ready to post."""
         shutil.move(str(task_path), str(self.done_path / task_path.name))
 
         await self._log_action("facebook_draft_created", task_path.name, {"draft": draft_path.name})
-        await update_dashboard_on_action(self.vault_path, "draft_created", "facebook_draft")
+        await update_dashboard_on_action(self.vault_path, "draft_created")
 
     async def _generate_facebook_draft(self, requirements: dict) -> str:
         """Generate Facebook post draft - community-focused, conversational."""

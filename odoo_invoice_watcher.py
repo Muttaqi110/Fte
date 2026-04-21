@@ -608,11 +608,8 @@ class OdooInvoiceWatcher(BaseWatcher):
 
         except RetryExhaustedError as e:
             logger.error(f"[OdooInvoiceWatcher] All retries exhausted for {file_path.name}: {e}")
-            # Move to Human_Review_Queue for manual intervention
-            review_path = self.needs_action_path.parent / "Human_Review_Queue" / file_path.name
-            review_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.rename(review_path)
-            await self._log_action("moved_to_review", file_path.stem, f"Retry exhausted: {e}")
+            file_path.unlink()
+            await self._log_action("invoice_deleted", file_path.stem, f"Retry exhausted: {e}")
             return False
 
         except Exception as e:
@@ -852,7 +849,7 @@ class OdooInvoicePoster(BaseWatcher):
 
                 # Update dashboard
                 if self._dashboard_updater:
-                    self._dashboard_updater.update_folder("odoo_invoices_approved")
+                    self._dashboard_updater.update_all()
 
                 # Log action
                 log_entry = {
@@ -879,10 +876,7 @@ class OdooInvoicePoster(BaseWatcher):
 
         except RetryExhaustedError as e:
             logger.error(f"[OdooInvoicePoster] All retries exhausted: {e}")
-            # Move to Human_Review_Queue
-            review_path = file_path.parent.parent / "Human_Review_Queue" / file_path.name
-            review_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.rename(review_path)
+            file_path.unlink()
             return False
 
         except Exception as e:
@@ -989,7 +983,7 @@ class OdooInvoicePoster(BaseWatcher):
 
                 # Update dashboard
                 if self._dashboard_updater:
-                    self._dashboard_updater.update_folder("odoo_invoices_done")
+                    self._dashboard_updater.update_all()
 
             except Exception as e:
                 logger.error(f"[OdooInvoicePoster] Error processing payment: {e}")

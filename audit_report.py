@@ -311,11 +311,11 @@ class AuditReport:
             if count > 3:
                 bottlenecks.append(f"- Pending approvals: {count} items")
 
-        quarantine = self.vault_path / "Quarantine"
-        if quarantine.exists():
-            count = len(list(quarantine.glob("*.md")))
+        human_review = self.vault_path / "Human_Review_Queue"
+        if human_review.exists():
+            count = len(list(human_review.glob("*.md")))
             if count > 0:
-                bottlenecks.append(f"- Quarantined items: {count} items")
+                bottlenecks.append(f"- Human review items: {count} items")
 
         # Check for overdue invoices
         pending_payment = self.vault_path / "Account" / "Odoo_Bills" / "Pending_Payment"

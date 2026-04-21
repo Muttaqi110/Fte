@@ -24,6 +24,8 @@ from gmail_watcher import create_watcher_from_env
 from orchestrator import Orchestrator
 from graceful_degradation import GracefulDegradation
 from watchdog import write_heartbeat, clear_heartbeat
+from dashboard_updater import DashboardUpdater
+from dashboard_updater import DashboardUpdater
 from config_parser import get_config_parser
 from subscription_auditor import create_auditor
 
@@ -53,8 +55,6 @@ async def run_system():
         "Needs_Action", "Plans",
         "Rejected", "Done", "Logs", "Templates", "Scheduled",
         "Pending_Approval",
-        # Error recovery folders
-        "Outbox_Queue", "Human_Review_Queue", "Quarantine",
         # Social Media
         "Social_Media/linkedin_post_request", "Social_Media/x_post_request", "Social_Media/facebook_post_request",
         "Social_Media/LinkedIn_Posts/Draft", "Social_Media/LinkedIn_Posts/Approved", "Social_Media/LinkedIn_Posts/Done",
@@ -373,6 +373,10 @@ async def run_system():
         clear_heartbeat("linkedin_watcher")
         clear_heartbeat("social_watcher")
         clear_heartbeat("send_mail_watcher")
+        # Set dashboard to Offline
+        dashboard_updater.set_system_offline()
+        # Set dashboard to Offline
+        dashboard_updater.set_system_offline()
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -395,6 +399,10 @@ async def run_system():
     heartbeat_task = asyncio.create_task(heartbeat_loop())
 
     # ==================== RUN ====================
+    # Set dashboard to Online
+    dashboard_updater = DashboardUpdater(vault_path)
+    dashboard_updater.set_system_online()
+
     logger.info("=" * 60)
     logger.info("Digital FTE Starting")
     logger.info("=" * 60)
@@ -418,6 +426,8 @@ async def run_system():
         logger.info("System shutdown requested")
     finally:
         heartbeat_task.cancel()
+        # Set dashboard to Offline
+        dashboard_updater.set_system_offline()
         logger.info("Digital FTE stopped")
 
 

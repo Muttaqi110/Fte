@@ -76,6 +76,8 @@ class FacebookPoster:
         self._page: Optional[Page] = None
         self._playwright = None
         self._logged_in = False  # Track if we've successfully logged in
+        # Human review path (root of vault)
+        self._human_review_path = vault_path / "Human_Review_Queue" if vault_path else None
 
     async def startup(self) -> None:
         """Initialize directories only. Browser is started lazily when needed."""
@@ -255,9 +257,9 @@ class FacebookPoster:
                 logger.warning(f"[FacebookPoster] Retrying in {delay:.1f}s... (attempt {retry_count + 1}/{MAX_RETRIES})")
                 await asyncio.sleep(delay)
                 return await self.publish_post(post_path, retry_count + 1)
-            # All retries exhausted - move to Human_Review_Queue
+            # All retries exhausted - move to human review
             logger.error(f"[FacebookPoster] All {MAX_RETRIES} retries exhausted - browser failed to start")
-            await self._move_to_human_review(post_path, "Browser failed to start after 5 retries")
+            await self._move_to_human_review(post_path, "Browser failed to start after max retries")
             return False
 
         if not self._page:
@@ -267,9 +269,9 @@ class FacebookPoster:
                 logger.warning(f"[FacebookPoster] Retrying in {delay:.1f}s... (attempt {retry_count + 1}/{MAX_RETRIES})")
                 await asyncio.sleep(delay)
                 return await self.publish_post(post_path, retry_count + 1)
-            # All retries exhausted - move to Human_Review_Queue
+            # All retries exhausted - move to human review
             logger.error(f"[FacebookPoster] All {MAX_RETRIES} retries exhausted - page initialization failed")
-            await self._move_to_human_review(post_path, "Page initialization failed after 5 retries")
+            await self._move_to_human_review(post_path, "Page initialization failed after max retries")
             return False
 
         # Read approved post
@@ -542,10 +544,9 @@ class FacebookPoster:
                     editor_text = await editor.inner_text()
                     if editor_text and len(editor_text.strip()) > 0:
                         logger.warning("[FacebookPoster] Editor still has text - post may NOT have been published!")
-                        logger.warning("[FacebookPoster] Posting likely FAILED - moving to Human_Review_Queue")
-                        # Clean up and move to human review since post likely failed
+                        logger.warning("[FacebookPoster] Posting likely FAILED - moving to human review")
                         await self._close_browser()
-                        await self._move_to_human_review(post_path, "Post button clicked but content still in editor - likely failed")
+                        await self._move_to_human_review(post_path, "Post likely failed - editor still has text")
                         return False
             except Exception:
                 pass
@@ -568,7 +569,7 @@ class FacebookPoster:
 
             # Update dashboard
             if self._dashboard_updater:
-                self._dashboard_updater.update_folder("facebook_done")
+                self._dashboard_updater.update_all()
 
             # Close browser after successful posting
             await self._close_browser()
@@ -587,33 +588,10 @@ class FacebookPoster:
                 await asyncio.sleep(delay)
                 return await self.publish_post(post_path, retry_count + 1)
 
-            # All retries exhausted - move to Human_Review_Queue
+            # All retries exhausted - move to human review
             logger.error(f"[FacebookPoster] All {MAX_RETRIES} retries exhausted for {post_path.stem}")
             await self._move_to_human_review(post_path, str(e))
             return False
-
-    async def _move_to_human_review(self, post_path: Path, error: str) -> None:
-        """Move failed post to human review queue."""
-        try:
-            review_path = self.approved_path.parent.parent / "Human_Review_Queue"
-            review_path.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            review_filename = f"{timestamp}_failed_{post_path.stem}.md"
-            review_file = review_path / review_filename
-
-            # Add error metadata
-            content = post_path.read_text(encoding="utf-8")
-            review_content = content + f"\n\n---\n\n**PUBLISHING FAILED:** {datetime.now().isoformat()}\n**Error:** {error}\n**Action Required:** Manual review and retry\n"
-            review_file.write_text(review_content, encoding="utf-8")
-
-            # Remove from approved
-            post_path.unlink()
-
-            await self._log_action("moved_to_human_review", post_path.stem, f"Error: {error}")
-            logger.info(f"[FacebookPoster] Moved to Human_Review_Queue: {review_filename}")
-        except Exception as e:
-            logger.error(f"[FacebookPoster] Failed to move to human review: {e}")
 
     def _extract_content_from_markdown(self, md_content: str) -> Optional[str]:
         """Extract post content from markdown file."""
@@ -675,6 +653,35 @@ class FacebookPoster:
         log_file = self.logs_path / f"facebook_poster_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
+
+    async def _move_to_human_review(
+        self,
+        file_path: Path,
+        reason: str,
+    ) -> None:
+        """Move failed post to human review queue at vault root."""
+        try:
+            if not self._human_review_path:
+                return
+
+            self._human_review_path.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            review_filename = f"{timestamp}_failed_{file_path.stem}.md"
+            review_file = self._human_review_path / review_filename
+
+            # Add error metadata
+            content = file_path.read_text(encoding="utf-8")
+            review_content = content + f"\n\n---\n\n**PUBLISHING FAILED:** {datetime.now().isoformat()}\n**Error:** {reason}\n**Action Required:** Manual review and retry\n"
+            review_file.write_text(review_content, encoding="utf-8")
+
+            # Remove original
+            file_path.unlink()
+
+            await self._log_action("moved_to_human_review", file_path.stem, f"Error: {reason}")
+            logger.warning(f"[FacebookPoster] Moved to Human_Review_Queue: {file_path.name}")
+        except Exception as e:
+            logger.error(f"[FacebookPoster] Failed to move to human review: {e}")
 
 
 async def main():

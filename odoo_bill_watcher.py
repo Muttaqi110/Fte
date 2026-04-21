@@ -679,13 +679,9 @@ class OdooBillPoster(BaseWatcher):
 
         logger.info(f"[OdooBillPoster] Bill completed: {bill_file.name}")
 
-        # Update dashboard
+        # Update dashboard (full refresh)
         if self._dashboard_updater:
-            self._dashboard_updater.update_folder("odoo_bills_done")
-
-        # Update dashboard
-        if self._dashboard_updater:
-            self._dashboard_updater.update_folder("odoo_bills_done")
+            self._dashboard_updater.update_all()
 
     async def _call_odoo(self, model: str, method: str, args: list) -> Dict:
         """Call Odoo API with proper authentication."""

@@ -47,7 +47,6 @@ class OdooInvoiceAgent:
         self.rates_path = self.vault_path / "Rates.md"
         self.logs_path = self.vault_path / "Logs"
         self.odoo_invoices_path = self.vault_path / "Odoo_Invoices"
-        self.human_review_path = self.vault_path / "Human_Review_Queue"
 
         # Odoo configuration (from environment ONLY - never hardcode)
         self.odoo_config = {
@@ -414,10 +413,7 @@ class OdooInvoiceAgent:
             result["status"] = "failed"
             result["error"] = f"All retries exhausted: {e}"
             await self._log_action("retry_exhausted", task_file.stem, str(e))
-            # Move to Human_Review_Queue
-            review_path = self.human_review_path / task_file.name
-            self.human_review_path.mkdir(parents=True, exist_ok=True)
-            task_file.rename(review_path)
+            task_file.unlink()
             return result
 
         except Exception as e:
@@ -502,10 +498,7 @@ class OdooInvoiceAgent:
         except RetryExhaustedError as e:
             result["status"] = "failed"
             result["error"] = f"All retries exhausted: {e}"
-            # Move to Human_Review_Queue
-            review_path = self.human_review_path / approval_file.name
-            self.human_review_path.mkdir(parents=True, exist_ok=True)
-            approval_file.rename(review_path)
+            approval_file.unlink()
             return result
 
         except Exception as e:

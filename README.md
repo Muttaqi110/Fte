@@ -55,7 +55,7 @@ pm2 stop all        # Stop all processes
 ### Error Recovery (Gold Tier)
 
 - **Exponential Backoff Retry**: Automatic retry with 1s base delay, 60s max delay, 5 max retries
-- **Comms Failure**: Outgoing tasks queued in `Outbox_Queue/` for auto-retry
+- **Comms Failure**: Outgoing tasks queued for auto-retry when connection restores
 - **Financial Safety**: Banking/payment APIs never auto-retry, require human approval
 - **Social Media Retry**: Post publishing failures retry 5 times, then move to `Human_Review_Queue/`
 - **Watchdog**: Monitors process health, auto-restarts crashed processes
@@ -209,70 +209,56 @@ Payment registered in Odoo → Odoo_Invoices/Done/
 
 ```
 AI_Employee_Vault/
-├── Inbox/              # Gmail emails (raw)
-├── whatsapp_inbox/     # WhatsApp messages (raw)
-├── Needs_Action/       # Processing queue (invoice & bill requests go here)
-├── Plans/              # Execution plans
-├── Rejected/           # Discarded drafts
-├── Done/               # Completed tasks
 ├── Account/            # Accounting
-│   ├── send_invoices/  # (deprecated, use Needs_Action/)
-│   ├── send_bills/     # (deprecated, use Needs_Action/)
 │   ├── Odoo_Invoices/  # Invoice workflow
+│   │   ├── Draft/
+│   │   ├── Pending_Payment/
+│   │   └── Done/
 │   └── Odoo_Bills/     # Bill workflow
-├── Social_Media/
-│   ├── linkedin_post_request/      # LinkedIn post requirements
-│   ├── x_post_request/             # X (Twitter) post requirements
-│   ├── facebook_post_request/     # Facebook post requirements
-│   ├── LinkedIn_Posts/
-│   │   ├── Draft/
-│   │   ├── Approved/
-│   │   ├── Done/
-│   │   └── SUMMARY.md     # Post summary
-│   ├── X_Posts/
-│   │   ├── Draft/
-│   │   ├── Approved/
-│   │   ├── Done/
-│   │   └── SUMMARY.md     # Post summary
-│   └── Facebook_Posts/
 │       ├── Draft/
-│       ├── Approved/
-│       ├── Done/
-│       └── SUMMARY.md     # Post summary
-├── Gmail/
-│   ├── Inbox/
-│   ├── send_mails/
-│   └── Gmail_Messages/
-│       ├── Draft/
-│       ├── Approved/
 │       └── Done/
-├── WhatsApp/
-│   ├── whatsapp_inbox/
-│   └── WhatsApp_Messages/
-│       ├── Draft/
-│       ├── Approved/
-│       └── Done/
-├── Odoo_Invoices/
-│   ├── Draft/
-│   ├── Approved/
-│   ├── Pending_Payment/
-│   ├── Payment_Recieved/
-│   ├── Done/
-│   └── Rejected/
-├── Odoo_Bills/
-│   ├── Draft/
+├── Audit/              # Audit reports
+├── Done/               # Completed tasks
+├── Facebook_Posts/     # Facebook posts (root)
 │   ├── Approved/
 │   └── Done/
-├── Outbox_Queue/       # Failed outgoing tasks (auto-retry)
-├── Human_Review_Queue/ # Uninterpretable messages
-├── Quarantine/         # Corrupted/invalid files
+├── Gmail/               # Gmail
+│   ├── Inbox/
+│   ├── Gmail_Messages/
+│   │   ├── Draft/
+│   │   └── Done/
+│   └── send_mails/
 ├── Logs/               # Audit trail
+├── Needs_Action/       # Processing queue
+├── Plans/              # Execution plans
+├── Rejected/           # Discarded drafts
 ├── Scheduled/          # Future tasks (supports repeat schedules)
-├── Rates.md            # Service rates for invoice calculation
+├── Social_Media/
+│   ├── linkedin_post_request/
+│   ├── x_post_request/
+│   ├── facebook_post_request/
+│   ├── LinkedIn_Posts/
+│   │   ├── Draft/
+│   │   └── Done/
+│   ├── X_Posts/
+│   │   ├── Draft/
+│   │   └── Done/
+│   └── Facebook_Posts/
+│       ├── Draft/
+│       └── Done/
 ├── Templates/          # Response templates
-├── Dashboard.md        # System status dashboard
+├── WhatsApp/
+│   ├── WhatsApp_Messages/
+│   │   ├── Draft/
+│   │   └── Done/
+│   └── whatsapp_inbox/
+├── X_Posts/            # X posts (root)
+│   ├── Approved/
+│   └── Done/
+├── Business_Goals.md   # For daily posts
 ├── Company_Handbook.md # Business rules
-└── Business_Goals.md   # For daily posts
+├── Dashboard.md        # System status dashboard (auto-updates)
+└── Rates.md            # Service rates
 
 /tmp/
 ├── AI_Employee_Buffer/    # Storage fallback when vault locked
@@ -454,11 +440,10 @@ All API-calling functions use exponential backoff retry:
 
 | Failure Type | Behavior |
 |--------------|----------|
-| **Comms Down** | Tasks queued in `Outbox_Queue/`, auto-retry on restore |
+| **Comms Down** | Tasks queued for auto-retry on restore |
 | **Storage Locked** | Fallback to `/tmp/AI_Employee_Buffer/`, sync on restore |
 | **Financial API** | Never auto-retry → `Needs_Action/` with human approval flag |
 | **Uninterpretable** | Move to `Human_Review_Queue/` |
-| **Corrupted Data** | Move to `Quarantine/`, alert on Dashboard |
 
 ### Financial Safety
 
@@ -502,5 +487,3 @@ Draft files are named meaningfully based on content:
 - X: `x_topic-summary.md`
 - Facebook: `facebook_topic-summary.md`
 - Email: `email_recipient_topic.md`
-
-Each social media folder has a `SUMMARY.md` showing draft count and published posts.

@@ -75,6 +75,8 @@ class XPoster:
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
         self._playwright = None
+        # Human review path (root of vault)
+        self._human_review_path = vault_path / "Human_Review_Queue" if vault_path else None
 
     async def startup(self) -> None:
         """Initialize directories only. Browser is started lazily when needed."""
@@ -479,7 +481,7 @@ class XPoster:
 
             # Update dashboard
             if self._dashboard_updater:
-                self._dashboard_updater.update_folder("x_done")
+                self._dashboard_updater.update_all()
 
             # Close browser after successful posting
             await self._close_browser()
@@ -504,14 +506,16 @@ class XPoster:
             return False
 
     async def _move_to_human_review(self, post_path: Path, error: str) -> None:
-        """Move failed post to human review queue."""
+        """Move failed post to human review queue at vault root."""
         try:
-            review_path = self.approved_path.parent.parent / "Human_Review_Queue"
-            review_path.mkdir(parents=True, exist_ok=True)
+            if not self._human_review_path:
+                return
+
+            self._human_review_path.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             review_filename = f"{timestamp}_failed_{post_path.stem}.md"
-            review_file = review_path / review_filename
+            review_file = self._human_review_path / review_filename
 
             # Add error metadata
             content = post_path.read_text(encoding="utf-8")
@@ -522,7 +526,7 @@ class XPoster:
             post_path.unlink()
 
             await self._log_action("moved_to_human_review", post_path.stem, f"Error: {error}")
-            logger.info(f"[XPoster] Moved to Human_Review_Queue: {review_filename}")
+            logger.warning(f"[XPoster] Moved to Human_Review_Queue: {post_path.name}")
         except Exception as e:
             logger.error(f"[XPoster] Failed to move to human review: {e}")
 

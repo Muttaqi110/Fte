@@ -77,6 +77,12 @@ class LinkedInPoster:
         self._page: Optional[Page] = None
         self._playwright = None
 
+        # Human review path (root of vault)
+        self._human_review_path = vault_path / "Human_Review_Queue" if vault_path else None
+
+        # Human review path (root of vault)
+        self._human_review_path = vault_path / "Human_Review_Queue" if vault_path else None
+
     async def startup(self) -> None:
         """Initialize directories only. Browser is started lazily when needed."""
         self.approved_path.mkdir(parents=True, exist_ok=True)
@@ -603,7 +609,7 @@ class LinkedInPoster:
 
             # Update dashboard
             if self._dashboard_updater:
-                self._dashboard_updater.update_folder("linkedin_done")
+                self._dashboard_updater.update_all()
 
             # Close browser after successful posting
             await self._close_browser()
@@ -629,34 +635,12 @@ class LinkedInPoster:
                 await asyncio.sleep(delay)
                 return await self.publish_post(post_path, retry_count + 1)
 
-            # All retries exhausted - close browser and move to Human_Review_Queue
+            # All retries exhausted - close browser and delete failed file
             await self._close_browser()
             logger.error(f"[LinkedInPoster] All {MAX_RETRIES} retries exhausted for {post_path.stem}")
-            await self._move_to_human_review(post_path, str(e))
-            return False
-
-    async def _move_to_human_review(self, post_path: Path, error: str) -> None:
-        """Move failed post to human review queue."""
-        try:
-            review_path = self.approved_path.parent.parent / "Human_Review_Queue"
-            review_path.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            review_filename = f"{timestamp}_failed_{post_path.stem}.md"
-            review_file = review_path / review_filename
-
-            # Add error metadata
-            content = post_path.read_text(encoding="utf-8")
-            review_content = content + f"\n\n---\n\n**PUBLISHING FAILED:** {datetime.now().isoformat()}\n**Error:** {error}\n**Action Required:** Manual review and retry\n"
-            review_file.write_text(review_content, encoding="utf-8")
-
-            # Remove from approved
             post_path.unlink()
-
-            await self._log_action("moved_to_human_review", post_path.stem, f"Error: {error}")
-            logger.info(f"[LinkedInPoster] Moved to Human_Review_Queue: {review_filename}")
-        except Exception as e:
-            logger.error(f"[LinkedInPoster] Failed to move to human review: {e}")
+            await self._log_action("post_failed_deleted", post_path.stem, str(e))
+            return False
 
     def _extract_content_from_markdown(self, md_content: str) -> Optional[str]:
         """Extract post content from markdown file."""
@@ -704,6 +688,54 @@ class LinkedInPoster:
         log_file = self.logs_path / f"linkedin_poster_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
+
+    async def _move_to_human_review(
+        self,
+        file_path: Path,
+        reason: str,
+    ) -> None:
+        """Move a failed post to Human_Review_Queue at vault root."""
+        if not self._human_review_path:
+            return
+
+        self._human_review_path.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"{timestamp}_review_{file_path.stem}.md"
+
+        content = f"""# Human Review Required
+
+## Metadata
+
+| Field | Value |
+|-------|-------|
+| **Source** | linkedin_poster |
+| **Reason** | {reason} |
+| **Created** | {datetime.now().isoformat()} |
+| **Original File** | {file_path.name} |
+
+---
+
+## Original Content
+
+{file_path.read_text(encoding='utf-8')}
+
+---
+
+## Actions
+
+- [ ] Review and fix the issue
+- [ ] Move back to Approved folder to retry
+- [ ] Or delete if not applicable
+
+"""
+        review_file = self._human_review_path / filename
+        review_file.write_text(content, encoding="utf-8")
+
+        # Remove original
+        file_path.unlink()
+
+        logger.warning(f"[LinkedInPoster] Moved to Human_Review_Queue: {file_path.name}")
 
 
 async def main():

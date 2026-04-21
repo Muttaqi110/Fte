@@ -50,7 +50,6 @@ Generates comprehensive weekly financial and operational audit reports by analyz
 ### 7. Bottlenecks Detection
 - `Needs_Action/` > 5 items = "High pending queue"
 - `Pending_Approval/` > 3 items = "Pending approvals"
-- `Quarantine/` > 0 = "Quarantined items"
 - `Odoo_Bills/Draft/` > 0 = "Unpaid bills"
 
 ### 8. Suggestions (Auto-Analysis)

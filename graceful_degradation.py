@@ -2,11 +2,8 @@
 Graceful Degradation - Protocols for maintaining functionality during failures.
 
 Implements:
-1. Outbox Queue - Queue outgoing tasks when comms are down
-2. Storage Buffer - Fallback when Obsidian vault is inaccessible
-3. Human Review Queue - Uninterpretable messages
-4. Quarantine - Corrupted/invalid files
-5. Financial Safety - Never auto-retry, requires human approval
+1. Storage Buffer - Fallback when vault is inaccessible
+2. Financial Safety - Never auto-retry, requires human approval
 """
 
 import asyncio
@@ -70,20 +67,17 @@ class GracefulDegradation:
     Manages graceful degradation protocols for the Digital FTE.
 
     Handles:
-    - Outbox queue for failed outgoing communications
     - Storage buffer when vault is inaccessible
     - Human review queue for uninterpretable content
-    - Quarantine for corrupted data
+    - Financial safety with human approval
     """
 
     def __init__(
         self,
         vault_path: Path,
         logs_path: Path,
-        outbox_path: Optional[Path] = None,
         buffer_path: Optional[Path] = None,
         human_review_path: Optional[Path] = None,
-        quarantine_path: Optional[Path] = None,
     ):
         """
         Initialize graceful degradation manager.
@@ -91,39 +85,28 @@ class GracefulDegradation:
         Args:
             vault_path: Path to AI_Employee_Vault
             logs_path: Path to logs directory
-            outbox_path: Path to outbox queue (default: vault/Outbox_Queue)
             buffer_path: Path to storage buffer (default: /tmp/AI_Employee_Buffer)
             human_review_path: Path to human review queue
-            quarantine_path: Path to quarantine folder
         """
         self.vault_path = Path(vault_path)
         self.logs_path = Path(logs_path)
 
         # Set up paths with defaults
-        self.outbox_path = outbox_path or (self.vault_path / "Outbox_Queue")
         self.buffer_path = buffer_path or Path(tempfile.gettempdir()) / "AI_Employee_Buffer"
-        self.human_review_path = human_review_path or (self.vault_path / "Human_Review_Queue")
-        self.quarantine_path = quarantine_path or (self.vault_path / "Quarantine")
+        self.outbox_path = self.buffer_path / "outbox"
+        self.human_review_path = human_review_path or self.vault_path / "Human_Review_Queue"
 
         # State tracking
         self._vault_available: bool = True
-        self._comms_available: Dict[str, bool] = {
-            "gmail": True,
-            "whatsapp": True,
-            "linkedin": True,
-            "x": True,
-            "facebook": True,
-        }
+        self._comms_available: Dict[str, bool] = {}
         self._processing_queue: bool = False
 
     async def initialize(self) -> None:
         """Create all necessary directories."""
         for path in [
-            self.outbox_path,
             self.buffer_path,
-            self.human_review_path,
-            self.quarantine_path,
             self.logs_path,
+            self.human_review_path,
         ]:
             path.mkdir(parents=True, exist_ok=True)
 
@@ -244,7 +227,7 @@ class GracefulDegradation:
                     results["skipped"] += 1
                     continue
 
-                # Skip if max retries exceeded
+                # Skip if max retries exceeded - move to human review
                 if task.retry_count >= task.max_retries:
                     await self._move_to_human_review(task, "Max retries exceeded")
                     results["skipped"] += 1
@@ -587,70 +570,6 @@ This task requires **fresh human approval** before retry.
         if task_file.exists():
             task_file.unlink()
 
-    # ==================== QUARANTINE ====================
-
-    async def quarantine_file(
-        self,
-        file_path: Path,
-        reason: str,
-        error_details: Optional[str] = None,
-    ) -> Path:
-        """
-        Move a corrupted or invalid file to quarantine.
-
-        Args:
-            file_path: Path to the file to quarantine
-            reason: Why it's being quarantined
-            error_details: Additional error details
-
-        Returns:
-            Path to quarantined file
-        """
-        self.quarantine_path.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"{timestamp}_quarantine_{file_path.name}"
-
-        # Copy to quarantine
-        quarantined_file = self.quarantine_path / filename
-        shutil.copy2(file_path, quarantined_file)
-
-        # Create manifest entry
-        manifest_file = self.quarantine_path / "manifest.jsonl"
-        manifest_entry = {
-            "timestamp": timestamp,
-            "original_path": str(file_path),
-            "quarantined_as": filename,
-            "reason": reason,
-            "error_details": error_details,
-        }
-        manifest_file.write_text(
-            json.dumps(manifest_entry) + "\n",
-            encoding="utf-8"
-        )
-
-        # Remove original
-        file_path.unlink()
-
-        logger.warning(f"[GracefulDegradation] Quarantined: {file_path.name} -> {filename}")
-
-        await self._log_action(
-            action_type="file_quarantined",
-            details={
-                "original": str(file_path),
-                "quarantined_as": filename,
-                "reason": reason,
-            }
-        )
-
-        # Update dashboard
-        await self._update_dashboard_alert(
-            alert_type="quarantine",
-            message=f"File quarantined: {file_path.name}",
-            details=reason,
-        )
-
-        return quarantined_file
 
     # ==================== UTILITY METHODS ====================
 
@@ -737,8 +656,6 @@ This task requires **fresh human approval** before retry.
         return {
             "vault_available": self._vault_available,
             "comms_status": self._comms_available,
-            "outbox_queue_size": len(list(self.outbox_path.glob("*.json"))),
             "buffer_size": len(list(self.buffer_path.rglob("*"))),
             "human_review_size": len(list(self.human_review_path.glob("*.md"))),
-            "quarantine_size": len(list(self.quarantine_path.glob("*"))),
         }
