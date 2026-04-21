@@ -5,6 +5,9 @@ AI-powered automation with human-in-the-loop approval for emails, WhatsApp, and 
 **Gold Tier** - Built for 24/7 reliability with automatic error recovery and graceful degradation.
 
 ## Run
+```bash
+uv sync
+```
 
 ```bash
 python main.py

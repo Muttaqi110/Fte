@@ -104,18 +104,26 @@ class SendMailWatcher(BaseWatcher):
             logger.warning(f"[SendMailWatcher] No recipient found in {mail_path.name}, using filename")
             recipient = mail_path.stem.replace("_", " ").replace("-", " ")
 
-        # Add metadata to content
-        enriched_content = f"""---
-source: send_mails
-recipient: {recipient}
-created_at: {datetime.now().isoformat()}
+        # Create Email Draft format matching user's exact pattern
+        enriched_content = f"""# Email Draft
+
+## To: {recipient}
+## Subject: {self._extract_subject(content) or '(No Subject)'}
+
 ---
 
-{content}
-"""
+{content.strip()}
 
-        # Move to Needs_Action with mail_ prefix (transfer, don't copy)
-        new_filename = f"mail_{mail_path.name}"
+---
+
+*Generated: {datetime.now().isoformat()}*"""
+
+        # Move to Needs_Action using email_<recipient>_<subject> naming pattern (same as orchestrator generates)
+        # Extract subject from content if available
+        subject = self._extract_subject(content) or "no-subject"
+        slug_subject = self._slugify(subject)[:50]
+        slug_recipient = self._slugify(recipient)[:30]
+        new_filename = f"email_{slug_recipient}_{slug_subject}.md"
         new_path = self.needs_action_path / new_filename
 
         # Write enriched content to Needs_Action
@@ -154,6 +162,31 @@ created_at: {datetime.now().isoformat()}
             return email_match.group(0)
 
         return ""
+
+    def _extract_subject(self, content: str) -> str:
+        """Extract subject from content."""
+        import re
+
+        patterns = [
+            r"^subject:\s*(.+)$",
+            r"^Subject:\s*(.+)$",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, content, re.MULTILINE)
+            if match:
+                return match.group(1).strip()
+
+        return ""
+
+    def _slugify(self, text: str) -> str:
+        """Convert text to a filesystem-safe slug."""
+        import re
+
+        slug = re.sub(r"[^a-zA-Z0-9\s-]", "", text)
+        slug = re.sub(r"[\s_]+", "-", slug)
+        slug = slug.strip("-")
+        return slug.lower() or "untitled"
 
     async def _log_action(self, action: str, filename: str, details: dict) -> None:
         """Log to JSON file."""

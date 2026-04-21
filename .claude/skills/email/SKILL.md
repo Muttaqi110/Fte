@@ -27,7 +27,7 @@ body: Please review the documents by Friday.
 
 When invoked:
 1. Parse the user request to extract recipient, subject, and body
-2. Create email file in `AI_Employee_Vault/Gmail/send_mails/`
+2. **Create email file in `AI_Employee_Vault/Gmail/send_mails/`**
 3. Poll `AI_Employee_Vault/Gmail/Gmail_Messages/Draft/` every 15 seconds
 4. Once a draft file appears (max 3 minutes), show it to the user
 5. Instruct user to move to `Approved/` to send

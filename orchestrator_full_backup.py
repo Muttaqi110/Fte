@@ -403,65 +403,59 @@ class Orchestrator:
     async def _generate_mail_draft(self, requirements: dict) -> str:
         """Generate email draft using Claude."""
         recipient = requirements.get("recipient", "")
-        original_body = requirements.get("body", "")
+        subject = requirements.get("subject", "")
+        body = requirements.get("body", "")
         tone = requirements.get("tone", "professional")
 
-        # Strict prompt - Claude must output ONLY the email, zero wrapper text
-        prompt = f"""You have full permissions to write this email on behalf of the user.
+        # Build prompt
+        prompt = f"""Write a professional email.
 
-RULE: Output ONLY the complete email text. NOTHING else.
-- NO "Here's the email"
-- NO "I've drafted"
-- NO explanations
-- NO intro/outro commentary
-- NO "As an AI"
-- NO "Here is the response"
+## Recipient
+{recipient}
 
-Write a {tone} email response to: {recipient}
+## Context/What to communicate
+{body}
 
-Context/Body:
-{original_body}
+## Tone
+{tone}
 
-Now write ONLY the email:"""
+Generate the email with:
+- **Subject line** - Create an appropriate subject based on the context (you decide the best subject)
+- **Body** - Professional email that addresses the recipient
 
-        draft_body = await self._call_claude(prompt)
+Format exactly as:
 
-        if not draft_body:
-            draft_body = f"Thank you for your message. I'll respond with details shortly."
-
-        # Clean meta-commentary
-        if any(bad in draft_body.lower() for bad in ["i've drafted", "the draft", "you'll need", "approval", "here's the email"]):
-            draft_body = f"Thank you for your message. I'll respond with details shortly."
-        else:
-            # Strip any wrapper lines
-            lines = draft_body.splitlines()
-            cleaned = []
-            found_content = False
-            for line in lines:
-                stripped = line.strip().lower()
-                if any(marker in stripped for marker in ["here's the", "here is the", "i've drafted", "the email"]):
-                    continue
-                if stripped and not found_content:
-                    found_content = True
-                if found_content:
-                    cleaned.append(line)
-            draft_body = "\n".join(cleaned).strip()
-
-        # Wrap in full draft format (matching send_mails & gmail responses)
-        draft = f"""# Email Draft
+# Email Draft
 
 ## To: {recipient}
-## Subject: Re: (auto-generated)
+## Subject: [your created subject]
 
 ---
 
-{draft_body}
+[Email body here]
 
 ---
 
 *Generated: {datetime.now().isoformat()}*"""
 
-        return draft
+        draft_content = await self._call_claude(prompt)
+
+        if not draft_content:
+            # Fallback
+            draft_content = f"""# Email Draft
+
+## To: {recipient}
+## Subject: {subject or "Follow up"}
+
+---
+
+{body}
+
+---
+
+*Generated: {datetime.now().isoformat()}*"""
+
+        return draft_content
 
     async def _process_linkedin_post_request(self, task_path: Path, content: str, metadata: dict) -> None:
         """Process a LinkedIn post request - auto-execute, save draft for publish approval."""
@@ -646,52 +640,79 @@ Now write ONLY the email:"""
         return requirements
 
     async def _generate_linkedin_draft(self, requirements: dict) -> str:
-        """Generate LinkedIn post draft."""
+        """Generate LinkedIn post draft using all requirements."""
+        # Get business goals for additional context (optional)
+        business_goals = await self._read_file(self.business_goals_path)
+
+        # Build requirements section for prompt
+        req_lines = []
+
+        # Use the original request content as the primary source
         original_request = requirements.get("business_goals", "")
-        topic = requirements.get("topic", "")
 
-        prompt = f"""ABSOLUTE RULE: Output ONLY the final post text.
-NO intro. NO wrapper. NO explanation. NOTHING except the exact post content.
+        topic = requirements.get("topic")
+        if topic:
+            req_lines.append(f"- Topic/Subject: {topic}")
 
-Write a LinkedIn post about: {original_request if original_request else topic}
+        tone = requirements.get("tone", "professional")
+        req_lines.append(f"- Tone: {tone}")
 
-Output:"""
+        target_audience = requirements.get("target_audience")
+        if target_audience:
+            req_lines.append(f"- Target Audience: {target_audience}")
+
+        value_prop = requirements.get("value_proposition")
+        if value_prop:
+            req_lines.append(f"- Value Proposition: {value_prop}")
+
+        include_cta = requirements.get("include_cta", True)
+        req_lines.append(f"- Call-to-Action: {'Yes - include clear CTA' if include_cta else 'No CTA needed'}")
+
+        hashtags = requirements.get("hashtags", [])
+        hashtag_count = requirements.get("hashtag_count", 5)
+        if hashtags:
+            req_lines.append(f"- Use these hashtags: {' '.join(hashtags)}")
+        else:
+            req_lines.append(f"- Include {hashtag_count} relevant hashtags")
+
+        length = requirements.get("length", "medium")
+        length_guide = {"short": "100-150 words", "medium": "150-250 words", "long": "250-400 words"}
+        req_lines.append(f"- Length: {length_guide.get(length, '150-250 words')}")
+
+        emoji = requirements.get("emoji", True)
+        req_lines.append(f"- Use emojis: {'Yes, sparingly' if emoji else 'No emojis'}")
+
+        key_offerings = requirements.get("key_offerings", [])
+        if key_offerings:
+            req_lines.append(f"- Key Offerings to mention: {', '.join(key_offerings)}")
+
+        requirements_text = "\n".join(req_lines)
+
+        # Build prompt with user's specific request as primary, business goals as secondary context
+        context_section = ""
+        if business_goals:
+            context_section = f"\n\nBusiness Context (for reference):\n{business_goals}"
+
+        prompt = f"""Create a LinkedIn post based on the user's specific request.
+
+## User's Request:
+{original_request}
+
+## Extracted Requirements:
+{requirements_text}
+{context_section}
+
+Generate the LinkedIn post now. Output ONLY the post content, ready to publish."""
 
         draft_content = await self._call_claude(prompt)
 
         if not draft_content:
+            # Fallback template using requirements
             draft_content = self._create_fallback_linkedin_post(requirements)
 
-        # Emergency filter for known meta-text
-        if any(bad in draft_content for bad in ["I need permission", "system will automatically", "Once created", "Waiting for file write permission", "Here's the", "Here is the", "I'll generate", "I'll create", "generate the post", "completed post", "final post", "post draft", "draft and save", "ready for publishing"]):
-            draft_content = self._create_fallback_linkedin_post(requirements)
-        else:
-            # Line-by-line cleaning
-            lines = draft_content.splitlines()
-            cleaned = []
-            in_wrapper = True
-
-            for line in lines:
-                stripped = line.strip().lower()
-                is_wrapper = any(p in stripped for p in [
-                    "here's the", "here is the", "i'll generate", "i'll create",
-                    "generate the post", "completed post", "final post",
-                    "post draft", "draft and save", "ready for publishing",
-                ])
-                if is_wrapper:
-                    continue
-                if in_wrapper and stripped == "":
-                    continue
-                if stripped.startswith("```"):
-                    continue
-                line = line.lstrip("> ").lstrip()
-                in_wrapper = False
-                cleaned.append(line)
-
-            draft_content = "\n".join(cleaned).strip()
-
-        # Wrap in full draft template
-        draft = f"""# LinkedIn Post Draft
+        # Ensure proper draft format
+        if "# LinkedIn Post Draft" not in draft_content:
+            draft_content = f"""# LinkedIn Post Draft
 
 ## Status: DRAFT - AWAITING APPROVAL
 
@@ -704,6 +725,10 @@ Output:"""
 ---
 
 *Generated: {datetime.now().isoformat()}*
+"""
+
+        # Add approval instructions
+        draft_content += """
 
 ---
 
@@ -717,20 +742,29 @@ Output:"""
 **To reject:**
 - Delete this file
 """
-        return draft
+
+        return draft_content
 
     def _create_fallback_linkedin_post(self, requirements: dict) -> str:
-        """Create a fallback LinkedIn post (content only)."""
+        """Create a fallback LinkedIn post from requirements."""
         topic = requirements.get("topic", "business insights")
         tone = requirements.get("tone", "professional")
         include_cta = requirements.get("include_cta", True)
         emoji = requirements.get("emoji", True)
         hashtags = requirements.get("hashtags", ["#Business", "#Growth", "#Leadership"])
 
-        emoji_bullet = "→ "
-        fire_emoji = " 🔥" if emoji else ""
+        emoji_bullet = "→ " if not emoji else "→ "
+        emoji_fire = "" if not emoji else " 🔥"
 
-        content = f"""The biggest opportunity in {topic}?
+        content = f"""# LinkedIn Post Draft
+
+## Status: DRAFT - AWAITING APPROVAL
+
+---
+
+## Post Content
+
+The biggest opportunity in {topic}?
 
 {"It's not what most people think." if tone == "thought-provoking" else "Here's what I've learned."}
 
@@ -739,17 +773,19 @@ Output:"""
 {emoji_bullet} Share insights, not just announcements
 
 {"The best results come from consistency." if tone == "professional" else "Success leaves clues."}
+
 """
         if include_cta:
-            content += f"""
+            content += f"""What's your take on {topic}?
 
-What's your take on {topic}?
+Drop a comment below{emoji_fire}
 
-Drop a comment below{fire_emoji}
 """
 
-        content += "\n" + "\n".join(hashtags[:5])
-        return content.strip()
+        content += "\n".join(hashtags[:5])
+        content += f"\n\n---\n\n*Generated: {datetime.now().isoformat()}*"
+
+        return content
 
     # ==================== X (TWITTER) POST PROCESSING ====================
 
@@ -800,52 +836,40 @@ Drop a comment below{fire_emoji}
         await update_dashboard_on_action(self.vault_path, "draft_created", "x_draft")
 
     async def _generate_x_draft(self, requirements: dict) -> str:
-        """Generate X (Twitter) post draft."""
+        """Generate X (Twitter) post draft - short, punchy, hashtag-rich."""
+        business_goals = await self._read_file(self.business_goals_path)
+        handbook = await self._read_file(self.handbook_path)
+
+        original_request = requirements.get("business_goals", "")
         topic = requirements.get("topic", "")
 
-        prompt = f"""ABSOLUTE RULE: Output ONLY the final post text. Max 280 characters.
-NO intro. NO wrapper. NO explanation. NO "here's the post". NO "I'll create". NO "completed".
-NOTHING except the exact text that should appear in the post.
+        prompt = f"""Create an X (Twitter) post.
 
-Write a Twitter/X post about: {topic}
+## User's Request:
+{original_request}
 
-Output:"""
+## Platform Requirements:
+- Engaging, professional text
+- Use relevant hashtags
+- Can use emojis
+- Direct and engaging tone
+
+## Business Context:
+{business_goals[:500] if business_goals else 'N/A'}
+
+## Company Rules:
+{handbook[:300] if handbook else 'N/A'}
+
+Output ONLY the post text, ready to post."""
 
         draft_content = await self._call_claude(prompt)
 
         if not draft_content:
             draft_content = self._create_fallback_x_post(requirements)
 
-        # Emergency filter
-        if any(bad in draft_content for bad in ["I need permission", "system will automatically", "Once created", "Waiting for file write permission"]):
-            draft_content = self._create_fallback_x_post(requirements)
-        else:
-            # Line-by-line cleaning
-            lines = draft_content.splitlines()
-            cleaned = []
-            in_wrapper = True
-
-            for line in lines:
-                stripped = line.strip().lower()
-                is_wrapper = any(p in stripped for p in [
-                    "here's the", "here is the", "i'll generate", "i'll create",
-                    "generate the post", "completed post", "final post",
-                    "post draft", "draft and save", "ready for publishing",
-                    "x post", "twitter post"
-                ])
-                if is_wrapper:
-                    continue
-                if in_wrapper and stripped == "":
-                    continue
-                if stripped.startswith("```"):
-                    continue
-                line = line.lstrip("> ").lstrip()
-                in_wrapper = False
-                cleaned.append(line)
-
-            draft_content = "\n".join(cleaned).strip()
-
-        draft = f"""# X (Twitter) Post Draft
+        # Format as proper draft
+        if "# X (Twitter) Post Draft" not in draft_content:
+            draft_content = f"""# X (Twitter) Post Draft
 
 ## Status: DRAFT - AWAITING APPROVAL
 
@@ -856,7 +880,6 @@ Output:"""
 {draft_content}
 
 ---
-
 **Platform:** X (Twitter)
 **Generated:** {datetime.now().isoformat()}*
 
@@ -872,7 +895,8 @@ Output:"""
 **To reject:**
 - Delete this file
 """
-        return draft
+
+        return draft_content
 
     def _create_fallback_x_post(self, requirements: dict) -> str:
         """Create a fallback X post."""
@@ -930,51 +954,42 @@ Output:"""
         await self._log_action("facebook_draft_created", task_path.name, {"draft": draft_path.name})
 
     async def _generate_facebook_draft(self, requirements: dict) -> str:
-        """Generate Facebook post draft."""
+        """Generate Facebook post draft - community-focused, conversational."""
+        business_goals = await self._read_file(self.business_goals_path)
+        handbook = await self._read_file(self.handbook_path)
+
         original_request = requirements.get("business_goals", "")
-        topic = requirements.get("topic", "")
 
-        prompt = f"""ABSOLUTE RULE: Output ONLY the final post text.
-NO intro. NO wrapper. NO explanation. NOTHING except the exact post content.
+        prompt = f"""Create a Facebook post.
 
-Write a Facebook post about: {original_request if original_request else topic}
+## User's Request:
+{original_request}
 
-Output:"""
+## Platform Requirements:
+- Community-focused, conversational tone
+- Encourage engagement and discussion
+- 100-300 words works well
+- Ask questions to spark conversation
+- Can use emojis
+- Include a clear call-to-action
+- Share personal stories or insights
+
+## Business Context:
+{business_goals[:500] if business_goals else 'N/A'}
+
+## Company Rules:
+{handbook[:300] if handbook else 'N/A'}
+
+Output ONLY the post text, ready to post."""
 
         draft_content = await self._call_claude(prompt)
 
         if not draft_content:
             draft_content = self._create_fallback_facebook_post(requirements)
 
-        # Emergency filter
-        if any(bad in draft_content for bad in ["I need permission", "system will automatically", "Once created", "Waiting for file write permission", "Here's the", "Here is the", "I'll generate", "I'll create", "generate the post", "completed post", "final post", "post draft", "draft and save", "ready for publishing"]):
-            draft_content = self._create_fallback_facebook_post(requirements)
-        else:
-            # Line-by-line cleaning
-            lines = draft_content.splitlines()
-            cleaned = []
-            in_wrapper = True
-
-            for line in lines:
-                stripped = line.strip().lower()
-                is_wrapper = any(p in stripped for p in [
-                    "here's the", "here is the", "i'll generate", "i'll create",
-                    "generate the post", "completed post", "final post",
-                    "post draft", "draft and save", "ready for publishing",
-                ])
-                if is_wrapper:
-                    continue
-                if in_wrapper and stripped == "":
-                    continue
-                if stripped.startswith("```"):
-                    continue
-                line = line.lstrip("> ").lstrip()
-                in_wrapper = False
-                cleaned.append(line)
-
-            draft_content = "\n".join(cleaned).strip()
-
-        draft = f"""# Facebook Post Draft
+        # Format as proper draft
+        if "# Facebook Post Draft" not in draft_content:
+            draft_content = f"""# Facebook Post Draft
 
 ## Status: DRAFT - AWAITING APPROVAL
 
@@ -1001,7 +1016,8 @@ Output:"""
 **To reject:**
 - Delete this file
 """
-        return draft
+
+        return draft_content
 
     def _create_fallback_facebook_post(self, requirements: dict) -> str:
         """Create a fallback Facebook post."""
@@ -1193,6 +1209,34 @@ Don't forget to like and share if this resonates with you! 👍"""
                     logger.error(f"[Orchestrator] Facebook publish failed: {approved_file.name}: {e}")
                     await self._log_action("facebook_post_error", approved_file.name, {"error": str(e)})
 
+        # Check X (Twitter) Approved folder
+        if self.x_approved_path.exists() and self.x_poster:
+            for approved_file in list(self.x_approved_path.glob("*.md")):
+                try:
+                    logger.info(f"[Orchestrator] Publishing X (Twitter) post: {approved_file.name}")
+                    success = await self.x_poster.publish_post(approved_file)
+                    if success:
+                        await self._log_action("x_post_published", approved_file.name, {})
+                    else:
+                        await self._log_action("x_post_failed", approved_file.name, {})
+                except Exception as e:
+                    logger.error(f"[Orchestrator] X publish failed: {approved_file.name}: {e}")
+                    await self._log_action("x_post_error", approved_file.name, {"error": str(e)})
+
+        # Check Facebook Approved folder
+        if self.facebook_approved_path.exists() and self.facebook_poster:
+            for approved_file in list(self.facebook_approved_path.glob("*.md")):
+                try:
+                    logger.info(f"[Orchestrator] Publishing Facebook post: {approved_file.name}")
+                    success = await self.facebook_poster.publish_post(approved_file)
+                    if success:
+                        await self._log_action("facebook_post_published", approved_file.name, {})
+                    else:
+                        await self._log_action("facebook_post_failed", approved_file.name, {})
+                except Exception as e:
+                    logger.error(f"[Orchestrator] Facebook publish failed: {approved_file.name}: {e}")
+                    await self._log_action("facebook_post_error", approved_file.name, {"error": str(e)})
+
     async def _execute_approved(self, draft_path: Path, source: str = None) -> None:
         """Execute an approved draft - folder presence = approval."""
         logger.info(f"[Orchestrator] Executing approved draft: {draft_path.name}")
@@ -1257,34 +1301,10 @@ Don't forget to like and share if this resonates with you! 👍"""
                 })
 
         elif source == "whatsapp" and self.whatsapp_watcher and to_addr:
-            # Send WhatsApp message - extract just the message text, strip all metadata
-            actual_message = body
-
-            # Clean WhatsApp draft format - extract only the message part
-            lines = body.splitlines()
-            in_message = False
-            cleaned_lines = []
-
-            for line in lines:
-                stripped = line.strip()
-
-                # Stop at final metadata footer
-                if stripped.startswith("*Generated:"):
-                    break
-
-                if stripped.startswith("**Message:**"):
-                    in_message = True
-                    continue
-
-                if in_message:
-                    cleaned_lines.append(line)
-
-            if cleaned_lines:
-                actual_message = "\n".join(cleaned_lines).strip()
-
+            # Send WhatsApp message
             result = await self.whatsapp_watcher.send_message(
                 contact_name=to_addr,
-                message=actual_message,
+                message=body,
             )
 
             if result.get("success"):
@@ -1314,75 +1334,64 @@ Don't forget to like and share if this resonates with you! 👍"""
             })
 
     def _extract_email_body(self, content: str) -> str:
-        """Extract the message body from draft content using separator positions."""
+        """Extract the message body from draft content."""
         lines = content.split("\n")
         body_lines = []
+        separator_count = 0
+        in_body = False
 
-        # Find positions of all separator lines
-        separator_positions = []
-        for i, line in enumerate(lines):
+        # Check if this is a WhatsApp message
+        is_whatsapp = "**Source:** whatsapp" in content or "source" in content.lower() and content.lower().find("whatsapp") > 0
+
+        for line in lines:
+            # Count separators to skip metadata section
             if line.strip() == "---":
-                separator_positions.append(i)
-
-        # Determine body boundaries based on separator count and metadata presence
-        start_line = 0
-        end_line = len(lines)
-
-        if len(separator_positions) >= 2:
-            # Check for metadata section (lines like **To:** or **Source:** before first separator)
-            has_metadata = any(
-                l.strip().startswith("**") and ":" in l and not l.strip().startswith("**Generated")
-                for l in lines[:separator_positions[0]]
-            )
-
-            if has_metadata:
-                # With metadata: body is after metadata section
-                if len(separator_positions) >= 3:
-                    # 3-sep format: header | metadata | body | footer
-                    start_line = separator_positions[1] + 1
-                    end_line = separator_positions[2]
-                else:
-                    # 2-sep with metadata: body between sep0 and sep1
-                    start_line = separator_positions[0] + 1
-                    end_line = separator_positions[1]
-            else:
-                # No metadata: body between first two separators
-                start_line = separator_positions[0] + 1
-                end_line = separator_positions[1]
-
-        # Check if this is a WhatsApp message format
-        is_whatsapp = "**Source:** whatsapp" in content
-
-        # Collect body lines
-        for i in range(start_line, end_line):
-            line = lines[i]
-            stripped = line.strip()
-
-            # Skip section headers
-            if stripped.startswith("## "):
-                if "Send Instructions" in stripped or "Metadata" in stripped:
-                    break
+                separator_count += 1
+                # After 2 separators, we're past the metadata header
+                if separator_count == 2:
+                    in_body = True
+                    continue
+                # After 3+ separators, we're past the body
+                if separator_count >= 3:
+                    in_body = False
                 continue
-            # Skip table rows
-            if stripped.startswith("| **") or stripped.startswith("|---"):
+
+            # Skip metadata section
+            if line.startswith("## ") and "Metadata" in line:
                 continue
-            # Skip metadata inline fields
-            if stripped.startswith("**Source:**") or stripped.startswith("**To:**"):
+            if line.startswith("| **") or line.startswith("|---"):
+                continue
+            # Skip Source/To metadata lines
+            if line.startswith("**Source:**") or line.startswith("**To:**"):
+                continue
+            # Skip Send Instructions section
+            if line.startswith("## Send Instructions"):
+                in_body = False
                 continue
             # Skip checkbox lines
-            if "[ ]" in stripped or "[x]" in stripped:
+            if "[ ]" in line or "[x]" in line:
                 continue
-            # Skip generated/retrieved timestamps
-            if stripped.startswith("*Generated:") or stripped.startswith("*Retrieved:"):
+            # Skip generated timestamp
+            if line.startswith("*Generated:"):
                 continue
-            # Skip WhatsApp **Message:** label
-            if is_whatsapp and stripped.startswith("**Message:**"):
+            if line.startswith("*Retrieved:"):
                 continue
 
-            body_lines.append(line)
+            if in_body:
+                # For WhatsApp: skip the **Message:** label
+                if is_whatsapp and ("**Message:**" in line or line.startswith("**Message:**")):
+                    continue
+                body_lines.append(line)
 
+        # Clean up
         body = "\n".join(body_lines).strip()
-        return body
+        # Remove leading/trailing separators
+        body = re.sub(r"^-{3,}\n?", "", body)
+        body = re.sub(r"\n-{3,}$", "", body)
+        # For WhatsApp: also remove **Message:** label
+        if is_whatsapp:
+            body = re.sub(r"^\*\*Message:\*\*\s*", "", body)
+        return body.strip()
 
     async def _check_daily_post(self) -> None:
         """Generate daily LinkedIn post if due."""
@@ -1533,49 +1542,34 @@ Generate now."""
         is_whatsapp = source.lower() == "whatsapp"
 
         if is_whatsapp:
-            prompt = f"""You have full permissions to respond as the user.
+            prompt = f"""Generate a SHORT WhatsApp response (1-2 sentences max).
 
-RULE: Output ONLY the response text. NOTHING else.
-- NO introductions
-- NO "Here's my response"
-- NO explanations
-- NO commentary
+Message: {content}
 
-Write a SHORT WhatsApp response (1-2 sentences max) to:
-{content}
-
-Now write ONLY the response:"""
+Response:"""
         else:
-            prompt = f"""You have full permissions to write this email on behalf of the user.
-
-RULE: Output ONLY the complete email content. NOTHING else.
-- NO "Here's the email"
-- NO "I've drafted"
-- NO intro/outro commentary
-- NO "As an AI"
-- NO "Best regards from AI"
-- NOTHING except the actual email body text
+            prompt = f"""You are an AI assistant. Generate a professional response.
 
 ## Company Rules
 {handbook}
 {flags_section}
 ---
 
-## Original Message
+## Message ({source.upper()})
 {content}
 
 ---
 
-Write a professional email response. Output ONLY the email body:"""
+Generate a professional response. Do NOT include any checkboxes or approval markers."""
 
         draft = await self._call_claude(prompt)
 
         if not draft:
             draft = f"""Thank you for your message. I'll respond with details shortly."""
 
-        # For WhatsApp, preserve the exact format you showed
+        # For WhatsApp, keep it brief - just the message
         if is_whatsapp:
-            return f"""---
+            draft_with_metadata = f"""---
 
 **Source:** whatsapp
 **To:** {contact}
@@ -1583,35 +1577,35 @@ Write a professional email response. Output ONLY the email body:"""
 ---
 
 **Message:**
-{draft.strip()}
+{draft}
 
 *Generated: {datetime.now().isoformat()}*"""
         else:
-            # Email/other: wrap in Email Draft format with subject
-            subject_from_meta = metadata.get("subject", "No Subject")
-            # If subject is generic auto-generated, convert to something useful
-            if subject_from_meta in ("No Subject", "", "(No Subject)"):
-                # Try to extract meaningful subject from original content
-                import re
-                subj_match = re.search(r"^## Subject:\s*(.+)$", content, re.MULTILINE)
-                if subj_match:
-                    subject_from_meta = subj_match.group(1).strip()
-                else:
-                    subject_from_meta = "Response"
+            # Add metadata header to preserve source and contact
+            draft_with_metadata = f"""---
 
-            # Return clean email draft format
-            return f"""# Email Draft
-
-## To: {contact}
-## Subject: Re: {subject_from_meta}
+**Source:** {source}
+**To:** {contact}
 
 ---
 
-{draft.strip()}
+{draft}
 
 ---
+
+## Send Instructions
+
+**To send this response:**
+1. Review the content above
+2. Edit if needed
+3. Move this file to the `Approved` folder
+
+**To reject:**
+- Delete this file
 
 *Generated: {datetime.now().isoformat()}*"""
+
+        return draft_with_metadata
 
     async def _call_claude(self, prompt: str) -> Optional[str]:
         """Call Claude CLI."""

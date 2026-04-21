@@ -403,35 +403,27 @@ class GmailWatcher(BaseWatcher):
         # Extract body
         body = self._extract_body(msg_data.get("payload", {}))
 
-        # Create filename
-        timestamp = received_date.strftime("%Y-%m-%d_%H-%M-%S") if received_date else datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        slug = self._slugify(subject)[:50]
-        filename = f"{timestamp}_{slug}.md"
+        # Create filename using email_<recipient>_<subject> pattern
+        # For incoming emails, extract sender email
+        sender_email = self._extract_email_address(from_addr)
+        recipient_slug = self._slugify(sender_email or "unknown")[:30]
+        subject_slug = self._slugify(subject)[:50]
+        filename = f"email_{recipient_slug}_{subject_slug}.md"
 
-        # Create markdown content
-        md_content = f"""# {subject}
+        # Create clean Email Draft format matching send_mails output
+        body_content = body.strip() if body and body != "(No text body found)" else ""
+        md_content = f"""# Email Draft
 
-## Email Metadata
-
-| Field | Value |
-|-------|-------|
-| **From** | {from_addr} |
-| **To** | {to_addr} |
-| **Cc** | {cc_addr} |
-| **Subject** | {subject} |
-| **Received Date** | {date_str} |
-| **Gmail ID** | {msg_id} |
+## To: {sender_email or from_addr}
+## Subject: {subject}
 
 ---
 
-## Body
-
-{body}
+{body_content}
 
 ---
 
-*Retrieved: {datetime.now().isoformat()}*
-"""
+*Generated: {datetime.now().isoformat()}*"""
 
         # Save to Inbox
         filepath = self.inbox_path / filename
@@ -508,6 +500,40 @@ class GmailWatcher(BaseWatcher):
         slug = re.sub(r"[\s_]+", "-", slug)
         slug = slug.strip("-")
         return slug.lower() or "email"
+
+    @staticmethod
+    def _extract_email_address(email_string: str) -> str:
+        """
+        Extract email address from a formatted string.
+
+        Examples: "John Doe <john@example.com>" → "john@example.com"
+                  "john@example.com" → "john@example.com"
+        """
+        import re
+        match = re.search(r"<([^>]+)>", email_string)
+        if match:
+            return match.group(1).strip()
+        # Check if it's just an email
+        if re.match(r"[\w\.-]+@[\w\.-]+\.\w+", email_string):
+            return email_string.strip()
+        return email_string.strip()
+
+    @staticmethod
+    def _extract_email_address(email_string: str) -> str:
+        """
+        Extract email address from a formatted string.
+
+        Examples: "John Doe <john@example.com>" → "john@example.com"
+                  "john@example.com" → "john@example.com"
+        """
+        import re
+        match = re.search(r"<([^>]+)>", email_string)
+        if match:
+            return match.group(1).strip()
+        # Check if it's just an email
+        if re.match(r"[\w\.-]+@[\w\.-]+\.\w+", email_string):
+            return email_string.strip()
+        return email_string.strip()
 
     @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
     @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
