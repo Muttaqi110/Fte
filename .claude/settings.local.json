@@ -10,7 +10,9 @@
       "Bash(mv /d/Programming/AAID/Hackathons/New/Fte/.claude/skills/audit.md /d/Programming/AAID/Hackathons/New/Fte/.claude/commands/audit.md)",
       "Bash(timeout 180 bash *)",
       "Bash(timeout 5 bash *)",
-      "Bash(timeout 10 bash *)"
+      "Bash(timeout 10 bash *)",
+      "Bash(xargs cat *)",
+      "Skill(schedule)"
     ]
   }
 }

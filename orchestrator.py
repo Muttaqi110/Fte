@@ -182,25 +182,48 @@ class Orchestrator:
         async with aiofiles.open(task_path, "r", encoding="utf-8") as f:
             content = await f.read()
 
-        metadata = self._parse_metadata(content)
-        flags = self._check_flags(content)
-        source = metadata.get("source", "email")
+        try:
+            metadata = self._parse_metadata(content)
+            if metadata is None:
+                metadata = {}
+        except:
+            metadata = {}
+
+        try:
+            flags = self._check_flags(content)
+            if flags is None:
+                flags = {}
+        except:
+            flags = {}
+
+        source = metadata.get("source", "email") if metadata else "email"
 
         # Check if this is a mail request from send_mails folder
-        if task_path.name.startswith("mail_") or source == "send_mails":
-            await self._process_mail_request(task_path, content, metadata)
-            return
-
-        # Check if this is a social media post request
-        if "linkedin_post" in task_path.name.lower() or "linkedin post request" in content.lower():
+        # CHECK SOCIAL POSTS FIRST! This must run before mail check
+        if "linkedin_post" in task_path.name.lower() or "linkedin post request" in content.lower() or "linkedin" in task_path.name.lower():
             await self._process_linkedin_post_request(task_path, content, metadata)
             return
 
-        if "_x_post" in task_path.name.lower() or "_twitter_post" in task_path.name.lower():
+        if "_x_post" in task_path.name.lower() or "_twitter_post" in task_path.name.lower() or "x post" in content.lower() or "twitter post" in content.lower() or "x_" in task_path.name.lower():
             await self._process_x_post_request(task_path, content, metadata)
             return
 
-        if "_facebook_post" in task_path.name.lower():
+        if "_facebook_post" in task_path.name.lower() or "facebook post" in content.lower() or "facebook" in task_path.name.lower():
+            await self._process_facebook_post_request(task_path, content, metadata)
+            return
+
+        if task_path.name.startswith("mail_") or source == "send_mails":
+            await self._process_mail_request(task_path, content, metadata)
+            return
+        if "linkedin_post" in task_path.name.lower() or "linkedin post request" in content.lower() or "linkedin" in task_path.name.lower():
+            await self._process_linkedin_post_request(task_path, content, metadata)
+            return
+
+        if "_x_post" in task_path.name.lower() or "_twitter_post" in task_path.name.lower() or "x post" in content.lower() or "twitter post" in content.lower() or "x_" in task_path.name.lower():
+            await self._process_x_post_request(task_path, content, metadata)
+            return
+
+        if "_facebook_post" in task_path.name.lower() or "facebook post" in content.lower() or "facebook" in task_path.name.lower():
             await self._process_facebook_post_request(task_path, content, metadata)
             return
 
@@ -702,7 +725,7 @@ Format exactly as:
 {requirements_text}
 {context_section}
 
-Generate the LinkedIn post now. Output ONLY the post content, ready to publish."""
+IMPORTANT: Output ONLY the post content. Do NOT include any meta-commentary, approval requests, or explanations. Just the post text ready to publish."""
 
         draft_content = await self._call_claude(prompt)
 
@@ -843,33 +866,30 @@ Drop a comment below{emoji_fire}
         original_request = requirements.get("business_goals", "")
         topic = requirements.get("topic", "")
 
-        prompt = f"""Create an X (Twitter) post.
+        prompt = f"""YOU ARE A POST WRITER.
+YOUR ONLY JOB IS TO WRITE THE POST TEXT.
+DO NOT WRITE ANY OTHER TEXT. DO NOT WRITE STATUS MESSAGES. DO NOT WRITE CONFIRMATIONS.
 
-## User's Request:
-{original_request}
+Create an X post about: {topic}
 
-## Platform Requirements:
-- Engaging, professional text
-- Use relevant hashtags
-- Can use emojis
-- Direct and engaging tone
-
-## Business Context:
-{business_goals[:500] if business_goals else 'N/A'}
-
-## Company Rules:
-{handbook[:300] if handbook else 'N/A'}
-
-Output ONLY the post text, ready to post."""
+Max 280 characters. Use hashtags. Just the post. Nothing else."""
 
         draft_content = await self._call_claude(prompt)
 
         if not draft_content:
             draft_content = self._create_fallback_x_post(requirements)
 
-        # Format as proper draft
-        if "# X (Twitter) Post Draft" not in draft_content:
-            draft_content = f"""# X (Twitter) Post Draft
+        # Fast safety filter - only remove exact bad lines
+        if "I need your permission" in draft_content:
+            # Cut everything before the actual post starts
+            if "---" in draft_content:
+                draft_content = draft_content.split("---", 1)[-1].strip()
+            if "## Post Content" in draft_content:
+                draft_content = draft_content.split("## Post Content", 1)[-1].strip()
+
+        # ALWAYS wrap the draft content. NEVER trust what the LLM returns.
+        # Always build the draft file manually ourselves from scratch.
+        draft_content = f"""# X (Twitter) Post Draft
 
 ## Status: DRAFT - AWAITING APPROVAL
 
@@ -981,7 +1001,7 @@ Output ONLY the post text, ready to post."""
 ## Company Rules:
 {handbook[:300] if handbook else 'N/A'}
 
-Output ONLY the post text, ready to post."""
+IMPORTANT: Output ONLY the post text. Do NOT include any meta-commentary, approval requests, or explanations. Just the post content ready to publish."""
 
         draft_content = await self._call_claude(prompt)
 

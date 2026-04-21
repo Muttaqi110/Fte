@@ -295,10 +295,6 @@ class FacebookPoster:
             await self._page.goto("https://www.facebook.com", wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(3)
 
-            # Take a screenshot for debugging
-            screenshot_path = self.logs_path / f"facebook_debug_feed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            await self._page.screenshot(path=str(screenshot_path), full_page=True)
-            logger.info(f"[FacebookPoster] Saved debug screenshot: {screenshot_path}")
 
             # Find and click the "Create post" area
             clicked = False
@@ -414,10 +410,6 @@ class FacebookPoster:
                 await self._page.evaluate(js_code, escaped_text)
                 await asyncio.sleep(1)
 
-            # Take screenshot before posting
-            pre_post_screenshot = self.logs_path / f"facebook_pre_post_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            await self._page.screenshot(path=str(pre_post_screenshot), full_page=True)
-            logger.info(f"[FacebookPoster] Saved pre-post screenshot: {pre_post_screenshot}")
 
             # Click the Post button - use JavaScript execution for reliability
             posted = False
@@ -517,11 +509,6 @@ class FacebookPoster:
 
             # Additional verification: Navigate to own profile and check for the post
             try:
-                await self._page.goto("https://www.facebook.com/me", wait_until="domcontentloaded", timeout=30000)
-                await asyncio.sleep(3)
-                profile_screenshot = self.logs_path / f"facebook_profile_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                await self._page.screenshot(path=str(profile_screenshot), full_page=True)
-                logger.info(f"[FacebookPoster] Saved profile screenshot: {profile_screenshot}")
 
                 # Check if we have any posts by looking for post content
                 search_term = post_text[:15].replace("'", "\\'")
@@ -531,10 +518,6 @@ class FacebookPoster:
             except Exception as e:
                 logger.debug(f"Profile check failed: {e}")
 
-            # Take final screenshot to confirm post state
-            final_screenshot = self.logs_path / f"facebook_final_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            await self._page.screenshot(path=str(final_screenshot), full_page=True)
-            logger.info(f"[FacebookPoster] Saved final screenshot: {final_screenshot}")
 
             # Check that composer input is cleared (meaning post was published)
             # If text still exists, the post may have failed
@@ -595,11 +578,9 @@ class FacebookPoster:
 
     def _extract_content_from_markdown(self, md_content: str) -> Optional[str]:
         """Extract post content from markdown file."""
-        # Strategy 1: Find content AFTER "## Post Content" and "---"
-        # The format is: ## Post Content\n---\nACTUAL CONTENT\n---
-        # So we need to look after the first ---
+        # Always take everything after ## Post Content until the next --- or header
         match = re.search(
-            r"## Post Content\s*\n*---\s*\n+(.+?)(?=\n---|\Z)",
+            r"## Post Content\s*\n+(.*?)(?=\n---|\n## |\Z)",
             md_content,
             re.DOTALL
         )

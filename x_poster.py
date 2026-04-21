@@ -532,38 +532,18 @@ class XPoster:
 
     def _extract_content_from_markdown(self, md_content: str) -> Optional[str]:
         """Extract post content from markdown file."""
-        # Strategy 1: Find content between "## Post Content" and "---"
-        # This captures everything including multiple bold sections
+        # Always take everything after ## Post Content until the next --- or header
         match = re.search(
-            r"## Post Content\s*\n+(.*?)\n*---",
+            r"## Post Content\s*\n+(.*?)(?=\n---|\n## |\Z)",
             md_content,
             re.DOTALL
         )
         if match:
             content = match.group(1).strip()
-            # Skip if it starts with the wrapper text
-            if not content.startswith("Based on the request details"):
-                return content
-
-        # Strategy 2: Get ALL bold text using greedy match between ** and **
-        # This captures the full post even if it has multiple ** sections
-        match = re.search(r"\*\*(.+)\*\*", md_content, re.DOTALL)
-        if match:
-            content = match.group(1).strip()
-            # Make sure it's not just "Based on the request details..."
-            if "Based on the request details" not in content:
-                return content
-
-        # Strategy 3: Find content between "## Post Content" and "##" (next header)
-        match = re.search(
-            r"## Post Content\s*\n+(.*?)(?=\n## |\Z)",
-            md_content,
-            re.DOTALL
-        )
-        if match:
-            content = match.group(1).strip()
-            if not content.startswith("Based on the request details"):
-                return content
+            # Remove any ** wrapping around the post
+            if content.startswith("**") and content.endswith("**"):
+                content = content[2:-2].strip()
+            return content
 
         return None
 
