@@ -50,7 +50,7 @@ When invoked:
 3. Poll Draft folder every 15 seconds (max 12 attempts = 3 minutes)
 4. Once draft appears, show user the Odoo status (invoice_id, partner_id, partner_name)
 5. Instruct user to move to Approved/ to post
-If draft does not appear in 3 minutes, inform user to wait or to check any issue
+If draft does not appear in 3 minutes, inform user to wait or to check any issue but never try to solve it yourself.
 
 ## Draft Detection
 

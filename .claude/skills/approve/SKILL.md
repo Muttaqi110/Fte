@@ -1,6 +1,6 @@
 ---
 name: approve
-description: Transfer/move draft files to their respective Approved folder for publishing. Use when user asks to "approve", "move to approved", "publish", or "send [platform]". Moves draft files from Draft/ to Approved/ folder.
+description: Transfer/move draft files to their respective Approved folder for publishing. Use when user asks to "approve", "move to approved","/aprove", "publish", or "send [platform]". Moves draft files from Draft/ to Approved/ folder.
 ---
 
 # Approve Skill

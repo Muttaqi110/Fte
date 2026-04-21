@@ -12,7 +12,9 @@
       "Bash(timeout 5 bash *)",
       "Bash(timeout 10 bash *)",
       "Bash(xargs cat *)",
-      "Skill(schedule)"
+      "Skill(schedule)",
+      "Bash(git show *)",
+      "Read(//tmp/**)"
     ]
   }
 }

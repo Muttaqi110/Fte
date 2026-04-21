@@ -105,27 +105,15 @@ class SocialPostWatcher(BaseWatcher):
             True if poll succeeded
         """
         for platform, folder_path in self.watch_folders.items():
-            current_files = set(f.name for f in folder_path.glob("*") if f.is_file())
-
-            # Find new files
-            new_files = current_files - self._processed_files
-
-            if new_files:
-                logger.info(f"[{self.name}] Found {len(new_files)} new file(s) for {platform}")
-
-            for filename in new_files:
-                file_path = folder_path / filename
-
+            # Process ALL files (no _processed_files tracking - processes new or replaced files)
+            for file_path in folder_path.glob("*.md"):
                 if not file_path.is_file():
                     continue
 
-                logger.info(f"[{self.name}] New {platform} requirement detected: {filename}")
+                logger.info(f"[{self.name}] New {platform} requirement detected: {file_path.name}")
 
                 # Move to Needs_Action
                 await self._move_to_needs_action(file_path, platform)
-
-                # Mark as processed
-                self._processed_files.add(filename)
 
         return True
 

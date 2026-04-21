@@ -79,7 +79,7 @@ max_attempts = 12  # 3 minutes max (12 * 15s = 180s)
 attempt = 0
 
 while attempt < max_attempts:
-    draft_files = list(draft_path.glob("*mail_draft*.md"))
+    draft_files = list(draft_path.glob("*email*.md"))
     if draft_files:
         # Show the newest draft
         latest = max(draft_files, key=lambda f: f.stat().st_mtime)
@@ -88,7 +88,7 @@ while attempt < max_attempts:
     time.sleep(15)
     attempt += 1
 ```
-If draft does not appear in 3 minutes, inform user to wait or to check any issue
+If draft does not appear in 3 minutes, inform user to wait or to check any issue but never try to solve it yourself.
 
 ## Parsing Tips
 
