@@ -210,6 +210,7 @@ async def run_system():
             approved_path=vault_path / "Social_Media" / "LinkedIn_Posts" / "Approved",
             done_path=vault_path / "Social_Media" / "LinkedIn_Posts" / "Done",
             logs_path=logs_path,
+            vault_path=vault_path,
             headless=os.getenv("LINKEDIN_HEADLESS", "false").lower() == "true",
         )
         await linkedin_post_requester.startup()
@@ -227,6 +228,7 @@ async def run_system():
             approved_path=vault_path / "Social_Media" / "X_Posts" / "Approved",
             done_path=vault_path / "Social_Media" / "X_Posts" / "Done",
             logs_path=logs_path,
+            vault_path=vault_path,
             headless=os.getenv("X_HEADLESS", "false").lower() == "true",
         )
         await x_poster.startup()
@@ -244,6 +246,7 @@ async def run_system():
             approved_path=vault_path / "Social_Media" / "Facebook_Posts" / "Approved",
             done_path=vault_path / "Social_Media" / "Facebook_Posts" / "Done",
             logs_path=logs_path,
+            vault_path=vault_path,
             headless=os.getenv("FACEBOOK_HEADLESS", "false").lower() == "true",
         )
         await facebook_poster.startup()
@@ -276,6 +279,7 @@ async def run_system():
             odoo_invoice_poster = OdooInvoicePoster(
                 odoo_invoices_path=vault_path / "Account" / "Odoo_Invoices",
                 logs_path=logs_path,
+                vault_path=vault_path,
                 poll_interval=10.0,
             )
             manager.add_watcher(odoo_invoice_poster)
@@ -311,6 +315,7 @@ async def run_system():
             odoo_bill_poster = OdooBillPoster(
                 odoo_bills_path=vault_path / "Account" / "Odoo_Bills",
                 logs_path=logs_path,
+                vault_path=vault_path,
                 poll_interval=10.0,
             )
             manager.add_watcher(odoo_bill_poster)

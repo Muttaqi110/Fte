@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Set
 
 from base_watcher import BaseWatcher
+from dashboard_updater import DashboardUpdater
+from dashboard_updater import DashboardUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,10 @@ class SocialPostWatcher(BaseWatcher):
         self.vault_path = Path(vault_path)
         self.needs_action_path = Path(needs_action_path)
         self.logs_path = Path(logs_path)
+        # Dashboard updater
+        self._dashboard_updater = DashboardUpdater(vault_path)
+        # Dashboard updater
+        self._dashboard_updater = DashboardUpdater(vault_path)
 
         # Determine which platforms to watch
         if platforms:
@@ -168,6 +174,10 @@ class SocialPostWatcher(BaseWatcher):
         file_path.unlink()
 
         logger.info(f"[{self.name}] Moved to Needs_Action: {new_filename}")
+
+        # Update dashboard - decrement request count, increment Needs_Action
+        self._dashboard_updater.update_folder(f"{platform}_post")
+        self._dashboard_updater.update_folder("needs_action")
 
         # Log
         await self._log_action("moved_to_needs_action", str(dest_path), platform)

@@ -952,6 +952,7 @@ Output ONLY the post text, ready to post."""
         shutil.move(str(task_path), str(self.done_path / task_path.name))
 
         await self._log_action("facebook_draft_created", task_path.name, {"draft": draft_path.name})
+        await update_dashboard_on_action(self.vault_path, "draft_created", "facebook_draft")
 
     async def _generate_facebook_draft(self, requirements: dict) -> str:
         """Generate Facebook post draft - community-focused, conversational."""
