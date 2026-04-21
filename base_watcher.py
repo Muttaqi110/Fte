@@ -127,7 +127,10 @@ class BaseWatcher(ABC):
         logger.info(f"[{self.name}] Starting watcher (poll interval: {self.poll_interval}s)")
 
         try:
-            await self.startup()
+            startup_result = await self.startup()
+            if startup_result is False:
+                logger.error(f"[{self.name}] Startup failed - stopping watcher")
+                return
             logger.info(f"[{self.name}] Startup complete, beginning poll loop")
 
             while self._running:

@@ -68,8 +68,12 @@ class WhatsAppWatcher(BaseWatcher):
     def name(self) -> str:
         return "WhatsAppWatcher"
 
-    async def startup(self) -> None:
-        """Initialize browser and navigate to WhatsApp Web."""
+    async def startup(self) -> bool:
+        """Initialize browser and navigate to WhatsApp Web.
+
+        Returns:
+            True if startup succeeded, False if it failed (e.g., QR timeout)
+        """
         self.inbox_path.mkdir(parents=True, exist_ok=True)
         self.needs_action_path.mkdir(parents=True, exist_ok=True)
         self.logs_path.mkdir(parents=True, exist_ok=True)
@@ -129,10 +133,13 @@ class WhatsAppWatcher(BaseWatcher):
                 await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"[{self.name}] QR scan timeout: {e}")
+                await self.shutdown()
                 return False
         else:
             # Already logged in
             logger.info(f"[{self.name}] WhatsApp Web loaded - logged in")
+
+        return True
 
     async def shutdown(self) -> None:
         """Cleanup browser."""
@@ -148,7 +155,8 @@ class WhatsAppWatcher(BaseWatcher):
     async def poll(self) -> bool:
         """Check for new WhatsApp messages."""
         if not self._page:
-            raise RuntimeError("Browser not initialized")
+            logger.warning(f"[{self.name}] Browser not initialized, attempting restart...")
+            return await self._restart_and_continue()
 
         logger.debug(f"[{self.name}] Polling for messages...")
 
@@ -174,7 +182,44 @@ class WhatsAppWatcher(BaseWatcher):
             return True
 
         except Exception as e:
-            logger.error(f"[{self.name}] Poll error: {e}")
+            error_msg = str(e).lower()
+            # Check for page crash - restart the browser
+            if "target crashed" in error_msg or "page is closed" in error_msg or "context is closed" in error_msg:
+                logger.warning(f"[{self.name}] Browser crash detected: {e}. Restarting...")
+                return await self._restart_and_continue()
+            else:
+                logger.error(f"[{self.name}] Poll error: {e}")
+                return False
+
+    async def _restart_and_continue(self) -> bool:
+        """Restart the browser and continue watching."""
+        try:
+            logger.info(f"[{self.name}] Attempting WhatsApp browser restart...")
+            # Clean shutdown of current instance
+            try:
+                await self.shutdown()
+            except Exception:
+                pass
+
+            # Re-initialize
+            self._context = None
+            self._page = None
+            self._playwright = None
+
+            # Wait a bit before restart
+            await asyncio.sleep(3)
+
+            # Startup again
+            success = await self.startup()
+            if success:
+                logger.info(f"[{self.name}] Restart successful, resuming polling")
+                return True
+            else:
+                logger.error(f"[{self.name}] Restart failed - WhatsApp unavailable")
+                # Try again on next poll cycle (poll will fail and retry)
+                return False
+        except Exception as e:
+            logger.error(f"[{self.name}] Restart exception: {e}")
             return False
 
     async def _get_unread_chats(self) -> list[dict]:
@@ -234,6 +279,10 @@ class WhatsAppWatcher(BaseWatcher):
             chats = await self._page.evaluate(script)
             return chats or []
         except Exception as e:
+            error_msg = str(e).lower()
+            # Detect page crash and raise special marker
+            if "target crashed" in error_msg or "page is closed" in error_msg:
+                raise RuntimeError("PAGE_CRASH")
             logger.error(f"[{self.name}] Failed to get chats: {e}")
             return []
 
@@ -398,12 +447,22 @@ class WhatsAppWatcher(BaseWatcher):
             logger.info(f"[{self.name}] Going home...")
 
             # Most reliable: just reload the main WhatsApp page
-            await self._page.goto("https://web.whatsapp.com", wait_until="networkidle", timeout=30000)
+            try:
+                await self._page.goto("https://web.whatsapp.com", wait_until="networkidle", timeout=30000)
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "page is closed" in error_msg or "target closed" in error_msg:
+                    raise RuntimeError("PAGE_CRASH")
+                raise
             await asyncio.sleep(2)
 
             logger.info(f"[{self.name}] Returned to home/chat list")
 
         except Exception as e:
+            # If navigation fails due to page crash, let outer poll handler restart
+            error_msg = str(e).lower()
+            if "page is closed" in error_msg or "target closed" in error_msg or "page crash" in error_msg:
+                raise RuntimeError("PAGE_CRASH")
             logger.error(f"[{self.name}] Go home failed: {e}")
 
     async def _mark_chat_as_read(self, chat_name: str) -> None:
@@ -481,7 +540,6 @@ class WhatsAppWatcher(BaseWatcher):
         slug = re.sub(r"[\s_]+", "-", slug)
         return slug.strip("-").lower() or "chat"
 
-    @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
     @with_retry(max_retries=5, base_delay=1.0, max_delay=60.0)
     async def send_message(self, contact_name: str, message: str) -> dict:
         """
