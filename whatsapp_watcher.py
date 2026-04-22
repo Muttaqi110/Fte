@@ -588,13 +588,25 @@ class WhatsAppWatcher(BaseWatcher):
             await input_box.click()
             await asyncio.sleep(0.3)
 
-            # Type message character by character (more reliable for contenteditable)
-            await input_box.type(message, delay=20)
+            # Clear any existing text first
+            await self._page.keyboard.press("Control+A")
+            await asyncio.sleep(0.1)
+            await self._page.keyboard.press("Backspace")
+            await asyncio.sleep(0.3)
+
+            # Use triple-click to select all, then type (reliable for contenteditable)
+            await input_box.click()
+            await asyncio.sleep(0.1)
+            await self._page.keyboard.press("Control+A")
+            await asyncio.sleep(0.1)
+
+            # Type message character by character with natural delay
+            await input_box.type(message, delay=50)
             await asyncio.sleep(0.5)
 
             # Send by pressing Enter
             await self._page.keyboard.press("Enter")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2)
 
             # Close the chat so new messages show as unread
             await self._close_chat()
