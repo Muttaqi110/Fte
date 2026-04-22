@@ -86,17 +86,37 @@ class OdooInvoiceWatcher(BaseWatcher):
         self.odoo_password = os.getenv("ODOO_PASSWORD", "")
         self.odoo_api_version = os.getenv("ODOO_API_VERSION", "json-rpc")
 
-        # Invoice patterns to detect - only invoice-related, NOT bill-related
+        # Invoice patterns to detect - require EXPLICIT invoice intent
         self.invoice_patterns = [
+            r"(?:create|send|generate|make).*invoice",
+            r"(?:invoice|amount).*(?:due|owed|pending)",
+            r"(?:invoice|billing).*(?:request|for)",
+            r"send.*billing",
+            r"billing.*invoice",
+        ]
+
+        # Must have at least one of these keywords (higher signal)
+        self.invoice_keywords = [
             r"invoice",
-            r"payment",
-            r"charge",
-            r"fee",
+            r"billing",
+            r"invoice.*request",
             r"send.*invoice",
             r"create.*invoice",
-            r"generate.*invoice",
-            r"client",
-            r"customer",
+        ]
+
+        # Negative patterns - reject if these appear (it's NOT an invoice request)
+        self.negative_patterns = [
+            r"pay\s*(?:us|to|for)",
+            r"payment.*details",
+            r"account.*balance",
+            r"thank.*you.*payment",
+            r"received.*payment",
+            r"payment.*confirmed",
+            r"cc.*payment",
+            r"credit.*card",
+            r"debit.*card",
+            r"bank.*transfer",
+            r"refund",
         ]
 
         self._rates_cache: Optional[Dict[str, Any]] = None
@@ -166,9 +186,24 @@ class OdooInvoiceWatcher(BaseWatcher):
             return {}
 
     def _is_invoice_request(self, content: str) -> bool:
-        """Check if content is an invoice request."""
+        """Check if content is an invoice request.
+
+        Requires BOTH:
+        1. At least one explicit invoice keyword
+        2. AND at least one action/intent pattern
+        AND must NOT match negative patterns (like "payment received" emails)
+        """
         content_lower = content.lower()
-        return any(re.search(pattern, content_lower) for pattern in self.invoice_patterns)
+
+        # First check negative patterns - reject if matched
+        if any(re.search(pattern, content_lower) for pattern in self.negative_patterns):
+            return False
+
+        # Check for explicit invoice intent - must have keyword AND action pattern
+        has_keyword = any(re.search(pattern, content_lower) for pattern in self.invoice_keywords)
+        has_action = any(re.search(pattern, content_lower) for pattern in self.invoice_patterns)
+
+        return has_keyword and has_action
 
     def _extract_invoice_details(self, content: str) -> Dict[str, Any]:
         """Extract invoice details from request content."""
