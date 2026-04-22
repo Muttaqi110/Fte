@@ -191,16 +191,27 @@ class Orchestrator:
             await self._process_mail_request(task_path, content, metadata)
             return
 
-        # Check if this is a social media post request
-        if "linkedin_post" in task_path.name.lower() or "linkedin post request" in content.lower():
+        # Check if this is a social media post request (look for platform in content or filename)
+        content_lower = content.lower()
+        filename_lower = task_path.name.lower()
+
+        # Check for platform in content (YAML metadata or title)
+        if re.search(r"platform:\s*linkedin", content, re.IGNORECASE) or \
+           "linkedin" in filename_lower or \
+           "linkedin post" in content_lower:
             await self._process_linkedin_post_request(task_path, content, metadata)
             return
 
-        if "_x_post" in task_path.name.lower() or "_twitter_post" in task_path.name.lower():
+        if re.search(r"platform:\s*x", content, re.IGNORECASE) or \
+           "platform:\s*twitter" in content_lower or \
+           "_x_post" in filename_lower or \
+           "_twitter_post" in filename_lower:
             await self._process_x_post_request(task_path, content, metadata)
             return
 
-        if "_facebook_post" in task_path.name.lower():
+        if re.search(r"platform:\s*facebook", content, re.IGNORECASE) or \
+           "facebook" in filename_lower or \
+           "facebook post" in content_lower:
             await self._process_facebook_post_request(task_path, content, metadata)
             return
 
@@ -1257,30 +1268,13 @@ Don't forget to like and share if this resonates with you! 👍"""
                 })
 
         elif source == "whatsapp" and self.whatsapp_watcher and to_addr:
-            # Send WhatsApp message - extract just the message text, strip all metadata
-            actual_message = body
+            # Send WhatsApp message - body already extracted by _extract_email_body
+            actual_message = body.strip()
 
-            # Clean WhatsApp draft format - extract only the message part
-            lines = body.splitlines()
-            in_message = False
-            cleaned_lines = []
-
-            for line in lines:
-                stripped = line.strip()
-
-                # Stop at final metadata footer
-                if stripped.startswith("*Generated:"):
-                    break
-
-                if stripped.startswith("**Message:**"):
-                    in_message = True
-                    continue
-
-                if in_message:
-                    cleaned_lines.append(line)
-
-            if cleaned_lines:
-                actual_message = "\n".join(cleaned_lines).strip()
+            if not actual_message:
+                logger.error(f"[Orchestrator] WhatsApp body empty for {draft_path.name}")
+                await self._log_action("whatsapp_failed", draft_path.name, {"error": "Empty message body"})
+                return
 
             result = await self.whatsapp_watcher.send_message(
                 contact_name=to_addr,
@@ -1353,7 +1347,22 @@ Don't forget to like and share if this resonates with you! 👍"""
         # Check if this is a WhatsApp message format
         is_whatsapp = "**Source:** whatsapp" in content
 
-        # Collect body lines
+        # Special handling for WhatsApp format (has **Message:** section)
+        if is_whatsapp:
+            # Find **Message:** and extract everything after it until *Generated:
+            in_message_section = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("**Message:**"):
+                    in_message_section = True
+                    continue
+                if stripped.startswith("*Generated:") or stripped.startswith("*Retrieved:"):
+                    break
+                if in_message_section:
+                    body_lines.append(line)
+            return "\n".join(body_lines).strip()
+
+        # Collect body lines for regular format
         for i in range(start_line, end_line):
             line = lines[i]
             stripped = line.strip()
@@ -1374,9 +1383,6 @@ Don't forget to like and share if this resonates with you! 👍"""
                 continue
             # Skip generated/retrieved timestamps
             if stripped.startswith("*Generated:") or stripped.startswith("*Retrieved:"):
-                continue
-            # Skip WhatsApp **Message:** label
-            if is_whatsapp and stripped.startswith("**Message:**"):
                 continue
 
             body_lines.append(line)
